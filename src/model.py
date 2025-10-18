@@ -37,7 +37,7 @@ class ModelArtifacts:
 
     def save(self, name: str) -> Path:
         path = MODEL_DIR / f"{name}.joblib"
-        joblib.dump(self, path)
+        joblib.dump(self, path, compress=3)
         return path
 
     @classmethod
