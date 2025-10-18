@@ -6,7 +6,6 @@ __pycache__/
 .env
 env/
 data_cache/
-models/
 *.sqlite
 *.db
 *.log
