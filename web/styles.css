@@ -92,6 +92,56 @@ input[type="number"] {
   color: var(--text);
 }
 
+.suggestions {
+  position: relative;
+  margin-top: -0.4rem;
+}
+
+.suggestions.hidden {
+  display: none !important;
+}
+
+.suggestions__panel {
+  position: absolute;
+  top: 0.5rem;
+  left: 0;
+  right: 0;
+  background: rgba(17, 17, 17, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.45);
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 20;
+  backdrop-filter: blur(12px);
+}
+
+.suggestions__item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.65rem 0.75rem;
+  gap: 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.suggestions__item:hover {
+  background: rgba(76, 175, 239, 0.16);
+}
+
+.suggestions__item-symbol {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.suggestions__item-meta {
+  flex: 1;
+  font-size: 0.82rem;
+  color: #9aa4b2;
+  text-align: right;
+}
+
 .options {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

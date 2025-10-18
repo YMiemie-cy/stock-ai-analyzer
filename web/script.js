@@ -1,6 +1,8 @@
 const navButtons = document.querySelectorAll("nav button");
 const views = document.querySelectorAll(".view");
 const searchForm = document.getElementById("search-form");
+const tickerInput = document.getElementById("tickers-input");
+const tickerSuggestions = document.getElementById("ticker-suggestions");
 const searchStatus = document.getElementById("search-status");
 const searchResultsContainer = document.getElementById("search-results");
 const portfolioStatus = document.getElementById("portfolio-status");
@@ -78,6 +80,9 @@ if (searchResultsContainer) {
   searchResultsContainer.innerHTML = "<div class=\"empty-state\">请输入股票代码，以获取即时买卖参考。</div>";
 }
 
+let lookupTimer = null;
+let lookupAbortController = null;
+let lastLookupQuery = "";
 let portfolioTimer = null;
 let chatHistory = [];
 let chatSending = false;
@@ -102,6 +107,38 @@ navButtons.forEach((button) => {
       }
     }
   });
+});
+
+if (tickerInput) {
+  tickerInput.addEventListener("input", handleTickerInputChange);
+  tickerInput.addEventListener("focus", handleTickerInputChange);
+  tickerInput.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      hideTickerSuggestions();
+    }
+  });
+}
+
+if (tickerSuggestions) {
+  tickerSuggestions.addEventListener("mousedown", (event) => {
+    const target = event.target.closest(".suggestions__item");
+    if (!target) {
+      return;
+    }
+    event.preventDefault();
+    const symbol = target.dataset.symbol;
+    applyTickerSuggestion(symbol);
+  });
+}
+
+document.addEventListener("click", (event) => {
+  if (!tickerSuggestions || tickerSuggestions.classList.contains("hidden")) {
+    return;
+  }
+  if (tickerSuggestions.contains(event.target) || event.target === tickerInput) {
+    return;
+  }
+  hideTickerSuggestions();
 });
 
 function clearPortfolioAutoRefresh() {
@@ -557,6 +594,185 @@ function escapeHtml(str = "") {
   });
 }
 
+function getActiveTickerToken(value = "") {
+  const parts = value.split(",");
+  const activeIndex = Math.max(parts.length - 1, 0);
+  const activeRaw = parts[activeIndex] ?? "";
+  return {
+    parts,
+    activeIndex,
+    token: activeRaw.trim(),
+  };
+}
+
+function hideTickerSuggestions() {
+  if (!tickerSuggestions) {
+    return;
+  }
+  tickerSuggestions.innerHTML = "";
+  tickerSuggestions.classList.add("hidden");
+  delete tickerSuggestions.dataset.hasResults;
+}
+
+function setTickerSuggestionsContent(content) {
+  if (!tickerSuggestions) {
+    return;
+  }
+  if (!content) {
+    hideTickerSuggestions();
+    return;
+  }
+  tickerSuggestions.innerHTML = `<div class="suggestions__panel">${content}</div>`;
+  tickerSuggestions.classList.remove("hidden");
+}
+
+function renderTickerSuggestionResults(results, query) {
+  if (!tickerSuggestions) {
+    return;
+  }
+  if (!results?.length) {
+    setTickerSuggestionsContent(
+      `<div class="suggestions__item suggestions__item--empty">未找到与“${escapeHtml(query)}”匹配的代码</div>`
+    );
+    tickerSuggestions.dataset.hasResults = "0";
+    return;
+  }
+  const items = results
+    .map((item) => {
+      const symbol = escapeHtml(item.symbol ?? item.display_symbol ?? "");
+      const display = escapeHtml(item.display_symbol ?? item.symbol ?? "");
+      const labelParts = [];
+      if (item.short_name) {
+        labelParts.push(escapeHtml(item.short_name));
+      } else if (item.long_name) {
+        labelParts.push(escapeHtml(item.long_name));
+      }
+      if (item.exchange) {
+        labelParts.push(escapeHtml(item.exchange));
+      }
+      const meta = labelParts.join(" · ");
+      return `
+        <div class="suggestions__item" data-symbol="${symbol}">
+          <span class="suggestions__item-symbol">${display}</span>
+          <span class="suggestions__item-meta">${meta}</span>
+        </div>
+      `;
+    })
+    .join("");
+  setTickerSuggestionsContent(items);
+  tickerSuggestions.dataset.hasResults = "1";
+}
+
+function applyTickerSuggestion(symbol) {
+  if (!tickerInput || !symbol) {
+    hideTickerSuggestions();
+    return;
+  }
+  const { parts } = getActiveTickerToken(tickerInput.value);
+  const normalized = symbol.trim().toUpperCase();
+  if (!normalized) {
+    hideTickerSuggestions();
+    return;
+  }
+  if (parts.length === 0) {
+    parts.push(normalized);
+  } else {
+    parts[parts.length - 1] = normalized;
+  }
+  const sanitized = parts
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const unique = [];
+  const seen = new Set();
+  sanitized.forEach((item) => {
+    if (!seen.has(item)) {
+      seen.add(item);
+      unique.push(item);
+    }
+  });
+  tickerInput.value = unique.join(", ");
+  hideTickerSuggestions();
+  tickerInput.focus({ preventScroll: true });
+}
+
+async function requestTickerLookup(query) {
+  if (!tickerSuggestions) {
+    return;
+  }
+  const trimmed = query.trim();
+  if (!trimmed) {
+    hideTickerSuggestions();
+    return;
+  }
+  const cacheKey = trimmed.toLowerCase();
+  lastLookupQuery = cacheKey;
+  if (lookupAbortController) {
+    lookupAbortController.abort();
+  }
+  lookupAbortController = new AbortController();
+  setTickerSuggestionsContent(
+    `<div class="suggestions__item">正在搜索“${escapeHtml(trimmed)}”...</div>`
+  );
+  try {
+    const response = await fetch(`/api/lookup?q=${encodeURIComponent(trimmed)}`, {
+      signal: lookupAbortController.signal,
+    });
+    if (!response.ok) {
+      let message = response.statusText || response.status;
+      try {
+        const errorData = await response.json();
+        if (errorData?.detail) {
+          message = errorData.detail;
+        }
+      } catch (_) {
+        // ignore
+      }
+      throw new Error(`搜索失败：${message}`);
+    }
+    const data = await response.json();
+    if (lastLookupQuery !== cacheKey) {
+      return;
+    }
+    const results = Array.isArray(data?.results) ? data.results : [];
+    renderTickerSuggestionResults(results, trimmed);
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      return;
+    }
+    setTickerSuggestionsContent(
+      `<div class="suggestions__item suggestions__item--empty">${escapeHtml(
+        error?.message || "搜索失败，请稍后重试。"
+      )}</div>`
+    );
+    console.error(error);
+  }
+}
+
+function scheduleTickerLookup(query) {
+  if (lookupTimer) {
+    clearTimeout(lookupTimer);
+  }
+  lookupTimer = setTimeout(() => requestTickerLookup(query), 260);
+}
+
+function handleTickerInputChange() {
+  if (!tickerInput) {
+    return;
+  }
+  const { token } = getActiveTickerToken(tickerInput.value);
+  const trimmed = token.trim();
+  if (!trimmed) {
+    hideTickerSuggestions();
+    return;
+  }
+  const asciiOnly = /^[0-9a-z.\-]+$/i.test(trimmed);
+  if (asciiOnly && trimmed.length < 2) {
+    hideTickerSuggestions();
+    return;
+  }
+  scheduleTickerLookup(trimmed);
+}
+
 function renderChatMessages() {
   if (!chatLog) {
     return;
@@ -795,8 +1011,12 @@ function buildPortfolioStatusText(summaries) {
 
 async function analyzeTickers(event) {
   event.preventDefault();
-  const rawTickers = document.getElementById("tickers-input").value.trim();
-  const tickers = rawTickers.split(",").map((t) => t.trim().toUpperCase()).filter(Boolean);
+  hideTickerSuggestions();
+  const rawTickers = tickerInput ? tickerInput.value : "";
+  const tickers = rawTickers
+    .split(",")
+    .map((t) => t.trim().toUpperCase())
+    .filter(Boolean);
   if (!tickers.length) {
     searchStatus.textContent = "请输入至少一个股票代码";
     searchStatus.className = "status error";

@@ -8,4 +8,5 @@ rich
 pyarrow
 fastapi
 fastapi-poe
+httpx
 uvicorn[standard]

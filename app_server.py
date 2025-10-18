@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
-import json
 import asyncio
+import json
 import os
 import time
+import urllib.parse
 from collections import OrderedDict
 from datetime import datetime, timezone
 from numbers import Number
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
+import httpx
 import pandas as pd
 import yfinance as yf
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -28,6 +30,7 @@ from src.chatbot import (
     collect_response_text,
 )
 from src.core import run_analysis
+from src.tickers import normalize_tickers
 
 BASE_DIR = Path(__file__).resolve().parent
 WEB_DIR = BASE_DIR / "web"
@@ -37,9 +40,24 @@ ANALYSIS_CACHE_TTL = 180  # seconds
 REALTIME_CACHE_TTL = 60  # seconds
 MAX_ANALYSIS_CACHE_ENTRIES = 12
 HISTORY_EXPORT_LIMIT = 180
+LOOKUP_CACHE_TTL = 600  # seconds
+LOOKUP_LIMIT = 12
+YAHOO_LOOKUP_URL = "https://query2.finance.yahoo.com/v1/finance/search"
+YAHOO_LOOKUP_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Origin": "https://finance.yahoo.com",
+    "Referer": "https://finance.yahoo.com/",
+}
+SINA_LOOKUP_TEMPLATE = "https://suggest3.sinajs.cn/suggest/type=11,12,13,14,15&key={key}"
 
 _ANALYSIS_CACHE: "OrderedDict[tuple, Dict[str, Any]]" = OrderedDict()
 _REALTIME_CACHE: Dict[str, Dict[str, Any]] = {}
+_LOOKUP_CACHE: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
 
 LATEST_RESULT_FIELDS = {
     "timestamp",
@@ -491,6 +509,206 @@ async def serve_index() -> HTMLResponse:
     if not index_path.exists():
         raise HTTPException(status_code=404, detail="Frontend not found")
     return HTMLResponse(index_path.read_text(encoding="utf-8"))
+
+
+def _normalize_sina_symbol(raw: str) -> Optional[str]:
+    if not raw:
+        return None
+    lowered = raw.strip().lower()
+    if not lowered:
+        return None
+    if lowered.startswith("sh"):
+        code = lowered[2:]
+        if code.isdigit():
+            return f"{code}.SS"
+    elif lowered.startswith("sz"):
+        code = lowered[2:]
+        if code.isdigit():
+            return f"{code}.SZ"
+    elif lowered.startswith("bj"):
+        code = lowered[2:]
+        if code.isdigit():
+            return f"{code}.BJ"
+    elif lowered.startswith("hk"):
+        code = lowered[2:]
+        if code.isdigit():
+            return f"{code}.HK"
+    elif lowered.startswith("us"):
+        code = lowered[2:]
+        if code:
+            return code.upper()
+    return None
+
+
+async def _lookup_yahoo_source(query: str, seen_symbols: Set[str]) -> List[Dict[str, Any]]:
+    params = {
+        "q": query,
+        "quotesCount": LOOKUP_LIMIT,
+        "newsCount": 0,
+        "listsCount": 0,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=8.0, headers=YAHOO_LOOKUP_HEADERS) as client:
+            response = await client.get(YAHOO_LOOKUP_URL, params=params)
+            response.raise_for_status()
+    except httpx.HTTPStatusError as exc:  # pragma: no cover - network error
+        status = exc.response.status_code
+        if status == 429:
+            raise HTTPException(status_code=429, detail="搜索频率过高，请稍后再试") from exc
+        raise HTTPException(status_code=502, detail=f"代码搜索失败：{status}") from exc
+    except httpx.HTTPError as exc:  # pragma: no cover - network error
+        raise HTTPException(status_code=502, detail=f"代码搜索失败：{exc}") from exc
+
+    data = response.json()
+    quotes = data.get("quotes") or []
+    results: List[Dict[str, Any]] = []
+    for quote in quotes:
+        symbol = quote.get("symbol")
+        if not symbol or not isinstance(symbol, str):
+            continue
+        normalized, _, _ = normalize_tickers([symbol])
+        if not normalized:
+            continue
+        normalized_symbol = normalized[0]
+        if normalized_symbol in seen_symbols:
+            continue
+        seen_symbols.add(normalized_symbol)
+        results.append(
+            {
+                "symbol": normalized_symbol,
+                "display_symbol": symbol,
+                "short_name": quote.get("shortname") or quote.get("longname"),
+                "long_name": quote.get("longname"),
+                "exchange": quote.get("exchDisp") or quote.get("exchange"),
+                "type": quote.get("quoteType"),
+                "score": quote.get("score"),
+            }
+        )
+        if len(results) >= LOOKUP_LIMIT:
+            break
+    return results
+
+
+async def _lookup_sina_source(query: str, seen_symbols: Set[str]) -> List[Dict[str, Any]]:
+    try:
+        encoded = urllib.parse.quote_from_bytes(query.encode("gbk"))
+    except UnicodeEncodeError:
+        encoded = urllib.parse.quote(query)
+    url = SINA_LOOKUP_TEMPLATE.format(key=encoded)
+    try:
+        async with httpx.AsyncClient(
+            timeout=6.0,
+            headers={
+                "User-Agent": YAHOO_LOOKUP_HEADERS["User-Agent"],
+                "Accept": "*/*",
+            },
+        ) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+    except httpx.HTTPError as exc:  # pragma: no cover - network error
+        raise HTTPException(status_code=502, detail=f"代码搜索失败：{exc}") from exc
+
+    text = response.content.decode("gbk", errors="ignore")
+    if "suggestvalue" not in text:
+        return []
+    parts = text.split('"', 2)
+    if len(parts) < 2:
+        return []
+    payload = parts[1]
+    entries = [entry for entry in payload.split(";") if entry]
+    results: List[Dict[str, Any]] = []
+    for entry in entries:
+        fields = entry.split(",")
+        if len(fields) < 4:
+            continue
+        normalized_symbol = _normalize_sina_symbol(fields[3])
+        if not normalized_symbol or normalized_symbol in seen_symbols:
+            continue
+        short_name = fields[4] or fields[0]
+        long_name = fields[0] or short_name
+        exchange = normalized_symbol.split(".")[-1] if "." in normalized_symbol else None
+        seen_symbols.add(normalized_symbol)
+        results.append(
+            {
+                "symbol": normalized_symbol,
+                "display_symbol": normalized_symbol,
+                "short_name": short_name,
+                "long_name": long_name,
+                "exchange": exchange,
+                "type": "EQUITY",
+                "score": 75.0,
+            }
+        )
+        if len(results) >= LOOKUP_LIMIT:
+            break
+    return results
+
+
+async def _perform_symbol_lookup(query: str) -> List[Dict[str, Any]]:
+    cache_key = query.strip().lower()
+    now = time.time()
+    cached = _LOOKUP_CACHE.get(cache_key)
+    if cached and now - cached[0] < LOOKUP_CACHE_TTL:
+        return cached[1]
+
+    results: List[Dict[str, Any]] = []
+    seen_symbols: set[str] = set()
+
+    direct_symbols, _, _ = normalize_tickers([query])
+    if direct_symbols:
+        direct_symbol = direct_symbols[0]
+        seen_symbols.add(direct_symbol)
+        results.append(
+            {
+                "symbol": direct_symbol,
+                "display_symbol": direct_symbol,
+                "short_name": query.strip() or direct_symbol,
+                "long_name": None,
+                "exchange": direct_symbol.split(".")[-1] if "." in direct_symbol else None,
+                "type": "DIRECT",
+                "score": 1.0,
+            }
+        )
+
+    errors: List[HTTPException] = []
+    is_ascii_query = query.isascii()
+
+    if is_ascii_query:
+        try:
+            results.extend(await _lookup_yahoo_source(query, seen_symbols))
+        except HTTPException as exc:
+            errors.append(exc)
+    else:
+        try:
+            results.extend(await _lookup_sina_source(query, seen_symbols))
+        except HTTPException as exc:
+            if exc.status_code == 429 and results:
+                _LOOKUP_CACHE[cache_key] = (now, results)
+                return results
+            errors.append(exc)
+        if len(results) < LOOKUP_LIMIT:
+            try:
+                results.extend(await _lookup_yahoo_source(query, seen_symbols))
+            except HTTPException as exc:
+                errors.append(exc)
+
+    if not results:
+        if errors:
+            raise errors[-1]
+        raise HTTPException(status_code=404, detail="未找到匹配的代码")
+
+    trimmed_results = results[:LOOKUP_LIMIT]
+    _LOOKUP_CACHE[cache_key] = (now, trimmed_results)
+    return trimmed_results
+
+
+@app.get("/api/lookup")
+async def lookup(q: str = Query(..., min_length=1, description="股票代码或名称")) -> Dict[str, Any]:
+    query = q.strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="查询内容不能为空")
+    results = await _perform_symbol_lookup(query)
+    return {"query": query, "results": results}
 
 
 @app.post("/api/analyze")
