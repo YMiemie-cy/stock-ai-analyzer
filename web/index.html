@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stock AI Analyzer 控制台</title>
+    <link rel="icon" type="image/png" href="/static/logo.png" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header>
+      <div class="logo">
+        <img src="/static/logo.png" alt="Stock AI Analyzer Logo" />
+        <h1>Stock AI Analyzer 控制台</h1>
+      </div>
+      <nav>
+        <button data-view="search" class="active">即时信号</button>
+        <button data-view="portfolio">持仓监控</button>
+      </nav>
+    </header>
+
+    <main>
+      <section id="search-view" class="view active">
+        <h2>输入股票，获取当前买卖建议</h2>
+        <form id="search-form">
+          <label>
+            股票代码（逗号分隔）：
+            <input
+              type="text"
+              id="tickers-input"
+              placeholder="例如：NVDA, AAPL, 600519"
+              required
+            />
+          </label>
+          <div class="options">
+            <label>
+              观测年数：
+              <input type="number" id="lookback-input" value="5" min="1" />
+            </label>
+            <label>
+              预测周期（周）：
+              <input type="number" id="horizon-input" value="12" min="1" />
+            </label>
+            <label>
+              阈值：
+              <input type="number" step="0.01" id="threshold-input" value="0.05" />
+            </label>
+            <label>
+              分析频率：
+              <select id="frequency-select">
+                <option value="weekly" selected>周线</option>
+                <option value="daily">日线</option>
+                <option value="combined">周线 + 日线</option>
+              </select>
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" id="adaptive-checkbox" checked />
+              使用自适应阈值
+            </label>
+          </div>
+          <button type="submit">开始分析</button>
+        </form>
+        <div id="search-status" class="status"></div>
+        <div class="result-controls hidden" id="result-controls">
+          <div class="control-group">
+            <label>
+              筛选信号
+              <select id="decision-filter">
+                <option value="all">全部</option>
+                <option value="buy">只看买入</option>
+                <option value="hold">只看持有</option>
+                <option value="sell">只看卖出</option>
+              </select>
+            </label>
+            <label>
+              排序方式
+              <select id="sort-select">
+                <option value="origin">默认顺序</option>
+                <option value="confidence_desc">信心由高到低</option>
+                <option value="prob_gap_desc">Prob Gap 由高到低</option>
+                <option value="prob_buy_desc">买入概率由高到低</option>
+                <option value="prob_sell_desc">卖出概率由高到低</option>
+                <option value="hit_ratio_desc">回测命中率由高到低</option>
+                <option value="alpha_asc">按代码字母排序</option>
+              </select>
+            </label>
+          </div>
+          <div class="control-actions">
+            <button type="button" id="refresh-search">刷新结果</button>
+            <span id="search-updated" class="hint"></span>
+          </div>
+        </div>
+        <div id="search-results"></div>
+        <div id="chat-panel" class="chat-panel hidden">
+          <div class="chat-panel__header">
+            <h3>AI 投顾问答</h3>
+            <label class="chat-bot-select">
+              模型：
+              <select id="chat-bot">
+                <option value="GPT-5">GPT-5</option>
+                <option value="Claude-Sonnet-4.5">Claude-Sonnet-4.5</option>
+                <option value="GPT-4o">GPT-4o</option>
+                <option value="Gemini-2.5-Pro">Gemini-2.5-Pro</option>
+              </select>
+            </label>
+          </div>
+          <div class="chat-prompts">
+            <span>快捷提问：</span>
+            <button type="button" data-target="search" data-prompt="今天哪些信号最需要我立即关注？">今日重点关注？</button>
+            <button type="button" data-target="search" data-prompt="短线风险主要来自哪些标的？">短线风险在哪？</button>
+            <button type="button" data-target="search" data-prompt="如果信号突然反转，我应该如何调整仓位？">信号反转应对？</button>
+          </div>
+          <div id="chat-status" class="status"></div>
+          <div id="chat-log" class="chat-log"></div>
+          <form id="chat-form" class="chat-form">
+            <textarea
+              id="chat-input"
+              rows="3"
+              placeholder="输入你的问题，例如：当前是否适合增持？"
+              required
+            ></textarea>
+            <div class="chat-form__actions">
+              <button type="submit">发送</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section id="portfolio-view" class="view">
+        <h2>持仓信号实时监控</h2>
+        <div class="actions">
+          <button id="refresh-portfolio">立即刷新</button>
+          <span id="portfolio-status" class="status"></span>
+        </div>
+        <div class="result-controls hidden" id="portfolio-controls">
+          <div class="control-group">
+            <label>
+              分析频率
+              <select id="portfolio-frequency-select">
+                <option value="weekly" selected>周线</option>
+                <option value="daily">日线</option>
+                <option value="combined">周线 + 日线</option>
+              </select>
+            </label>
+            <label>
+              筛选信号
+              <select id="portfolio-filter-select">
+                <option value="all">全部</option>
+                <option value="buy">只看买入</option>
+                <option value="hold">只看持有</option>
+                <option value="sell">只看卖出</option>
+              </select>
+            </label>
+            <label>
+              排序方式
+              <select id="portfolio-sort-select">
+                <option value="origin">默认顺序</option>
+                <option value="confidence_desc">信心由高到低</option>
+                <option value="prob_gap_desc">Prob Gap 由高到低</option>
+                <option value="prob_buy_desc">买入概率由高到低</option>
+                <option value="prob_sell_desc">卖出概率由高到低</option>
+                <option value="hit_ratio_desc">回测命中率由高到低</option>
+                <option value="alpha_asc">按代码字母排序</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div id="portfolio-results"></div>
+        <div id="portfolio-chat-panel" class="chat-panel hidden">
+          <div class="chat-panel__header">
+            <h3>AI 投顾问答（持仓）</h3>
+            <label class="chat-bot-select">
+              模型：
+              <select id="portfolio-chat-bot">
+                <option value="GPT-5">GPT-5</option>
+                <option value="Claude-Sonnet-4.5">Claude-Sonnet-4.5</option>
+                <option value="GPT-4o">GPT-4o</option>
+                <option value="Gemini-2.5-Pro">Gemini-2.5-Pro</option>
+              </select>
+            </label>
+          </div>
+          <div class="chat-prompts">
+            <span>快捷提问：</span>
+            <button type="button" data-target="portfolio" data-prompt="今天哪些仓位需要我优先调整？">今天调整什么？</button>
+            <button type="button" data-target="portfolio" data-prompt="哪些持仓已经接近信号阈值，需要重点盯盘？">临界仓位？</button>
+            <button type="button" data-target="portfolio" data-prompt="我今天应该加仓还是减仓？">加仓还是减仓？</button>
+          </div>
+          <div id="portfolio-chat-status" class="status"></div>
+          <div id="portfolio-chat-log" class="chat-log"></div>
+          <form id="portfolio-chat-form" class="chat-form">
+            <textarea
+              id="portfolio-chat-input"
+              rows="3"
+              placeholder="向 AI 询问持仓策略，例如：是否需要减仓？"
+              required
+            ></textarea>
+            <div class="chat-form__actions">
+              <button type="submit">发送</button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>数据由本地模型计算，建议结合自身策略谨慎决策。</p>
+    </footer>
+
+    <script src="/static/script.js" type="module"></script>
+  </body>
+</html>

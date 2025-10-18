@@ -26,27 +26,33 @@
 ## 快速开始
 
 1. 激活仓库随附的虚拟环境：
+
    ```bash
    source .venv/bin/activate  # Windows 用户运行 .\.venv\Scripts\activate
    ```
 
    若需重新创建虚拟环境，可执行 `python -m venv .venv` 后再激活。
 2. 通过 `requirements.txt` 安装依赖（首次运行或依赖更新时）：
-   > 建议保持 `scikit-learn` 版本为 `1.6.1`（与预训练模型一致）。若使用 `pip`, 可执行 `pip install -r requirements.txt`，如需重新指定版本可在安装后运行 `pip install scikit-learn==1.6.1` 以避免模型反序列化告警。
-3. 使用 CLI 分析股票代码（首次运行会训练模型并缓存历史行情）：
-  ```bash
-  python -m src.cli --tickers AAPL MSFT NVDA --lookback-years 5 --train --resample-frequency weekly --horizon 12 --threshold 0.06 --adaptive-threshold --export-signals --summary-report
-   ```
 
-   - `--adaptive-threshold`：利用 ATR 调整买卖标签的收益阈值，兼顾高/低波动标的。
-   - `--export-signals`：将信号明细导出到 `reports/` 目录，便于后续回测或人工复盘。
-   - `--resample-frequency weekly`：以周为单位聚合 OHLCV，更贴合长期加减仓节奏；`--horizon 12` 即预测约 12 周后的收益。
-   - `--threshold` / `--min-threshold` / `--max-threshold`：控制买卖阈值区间，适配不同持仓目标。
-   - `--summary-report`：额外生成 Markdown 总览（默认命名为 `reports/summary_时间戳.md`），可打印成简洁报告。
-   - 支持 A 股 6 位代码（如 `600519`、`000001`）和美股/港股等带交易所后缀的代码；若输入公司名称请改用对应的交易所代码，也可在 `ticker_aliases.json` 中维护中文/英文别名。
+   > 建议保持 `scikit-learn` 版本为 `1.6.1`（与预训练模型一致）。若使用 `pip`, 可执行 `pip install -r requirements.txt`，如需重新指定版本可在安装后运行 `pip install scikit-learn==1.6.1` 以避免模型反序列化告警。
+   >
+3. 使用 CLI 分析股票代码（首次运行会训练模型并缓存历史行情）：
+
+```bash
+  python -m src.cli --tickers AAPL MSFT NVDA --lookback-years 5 --train --resample-frequency weekly --horizon 12 --threshold 0.06 --adaptive-threshold --export-signals --summary-report
+```
+
+- `--adaptive-threshold`：利用 ATR 调整买卖标签的收益阈值，兼顾高/低波动标的。
+- `--export-signals`：将信号明细导出到 `reports/` 目录，便于后续回测或人工复盘。
+- `--resample-frequency weekly`：以周为单位聚合 OHLCV，更贴合长期加减仓节奏；`--horizon 12` 即预测约 12 周后的收益。
+- `--threshold` / `--min-threshold` / `--max-threshold`：控制买卖阈值区间，适配不同持仓目标。
+- `--summary-report`：额外生成 Markdown 总览（默认命名为 `reports/summary_时间戳.md`），可打印成简洁报告。
+- 支持 A 股 6 位代码（如 `600519`、`000001`）和美股/港股等带交易所后缀的代码；若输入公司名称请改用对应的交易所代码，也可在 `ticker_aliases.json` 中维护中文/英文别名。
+
 4. 后续运行会复用已训练模型和缓存数据，除非再次传入 `--train`。
 5. 查看终端中的分析摘要与近期信号表；训练阶段默认采用时间顺序切分验证集，避免未来数据泄露。CSV/JSON 导出与提醒功能仍在规划中。
 6. 启动 Web 控制台获取交互式图形界面：
+
    ```bash
    uvicorn app_server:app --reload
    ```
@@ -94,4 +100,5 @@ python -m src.cli \
 ## 免责声明
 
 本工具仅用于研究与教育目的，不构成投资建议。在做出任何交易决策前，请务必自行进行充分调研。
+
 # stock-ai-analyzer

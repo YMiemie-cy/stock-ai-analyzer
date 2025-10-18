@@ -1,0 +1,49 @@
+Preparing dataset for tickers: 600050.SS, AAPL, TSLL | Lookback: 5 years
+Training model...
+TimeSeries CV (macro precision/recall/f1, accuracy): 0.444 / 0.407 / 0.342, 0.367
+Selected model params: {'learning_rate': 0.065, 'max_leaf_nodes': 127, 'min_samples_leaf': 30, 'l2_regularization': 0.005} (avg accuracy 0.367)
+Model saved to 
+/Users/ymiemie/亘强科技/code/stock-ai-analyzer/models/default_model.joblib
+Data coverage: 2020-10-25 → 2025-10-19 | Today: 2025-10-16
+
+600050.SS Signal Summary
+As of: 2025-10-19 | Price: 5.51 | Decision: BUY | Score: 0.20 | Probabilities ->
+Buy: 0.45, Hold: 0.30, Sell: 0.25 | Prob Gap: 0.15 | Confidence: 0.10
+Indicators -> SMA: +1, RSI: +0, MACD: -1, Bollinger: +0, Volume: +0 | Bias Avg: 
++0.00
+                                 Recent Signals                                 
+┏━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┓
+┃      ┃       ┃       ┃       ┃  Prob ┃  Prob ┃  Prob ┃  Prob ┃       ┃  Bias ┃
+┃ Date ┃ Deci… ┃ Score ┃ Price ┃   Buy ┃  Hold ┃  Sell ┃   Gap ┃ Conf… ┃   Avg ┃
+┡━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━┩
+└──────┴───────┴───────┴───────┴───────┴───────┴───────┴───────┴───────┴───────┘
+  Backtest | horizon: 4 | avg_ret: 0.042 | hit_ratio: 68.75% | cumulative: 
+134.501 | trades: 128
+
+AAPL Signal Summary
+As of: 2025-10-19 | Price: 249.34 | Decision: HOLD | Score: 0.12 | Probabilities
+-> Buy: 0.40, Hold: 0.27, Sell: 0.33 | Prob Gap: 0.06 | Confidence: 0.07
+Indicators -> SMA: +1, RSI: +0, MACD: +1, Bollinger: +0, Volume: -1 | Bias Avg: 
++0.20
+                                 Recent Signals                                 
+┏━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┓
+┃      ┃       ┃       ┃       ┃  Prob ┃  Prob ┃  Prob ┃  Prob ┃       ┃  Bias ┃
+┃ Date ┃ Deci… ┃ Score ┃ Price ┃   Buy ┃  Hold ┃  Sell ┃   Gap ┃ Conf… ┃   Avg ┃
+┡━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━┩
+└──────┴───────┴───────┴───────┴───────┴───────┴───────┴───────┴───────┴───────┘
+  Backtest | horizon: 4 | avg_ret: 0.037 | hit_ratio: 71.97% | cumulative: 
+222.349 | trades: 157
+
+TSLL Signal Summary
+As of: 2025-10-19 | Price: 19.84 | Decision: SELL | Score: -0.14 | Probabilities
+-> Buy: 0.30, Hold: 0.25, Sell: 0.45 | Prob Gap: 0.14 | Confidence: 0.10
+Indicators -> SMA: +1, RSI: +0, MACD: +1, Bollinger: -1, Volume: -1 | Bias Avg: 
++0.00
+                                 Recent Signals                                 
+┏━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┓
+┃      ┃       ┃       ┃       ┃  Prob ┃  Prob ┃  Prob ┃  Prob ┃       ┃  Bias ┃
+┃ Date ┃ Deci… ┃ Score ┃ Price ┃   Buy ┃  Hold ┃  Sell ┃   Gap ┃ Conf… ┃   Avg ┃
+┡━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━┩
+└──────┴───────┴───────┴───────┴───────┴───────┴───────┴───────┴───────┴───────┘
+  Backtest | horizon: 4 | avg_ret: 0.189 | hit_ratio: 71.56% | cumulative: 
+2419033.366 | trades: 109

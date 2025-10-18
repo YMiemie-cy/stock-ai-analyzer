@@ -1,0 +1,10 @@
+pandas
+numpy
+yfinance
+ta
+scikit-learn
+joblib
+rich
+pyarrow
+fastapi
+uvicorn[standard]
