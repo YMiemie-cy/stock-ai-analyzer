@@ -7,4 +7,5 @@ joblib
 rich
 pyarrow
 fastapi
+fastapi-poe
 uvicorn[standard]
