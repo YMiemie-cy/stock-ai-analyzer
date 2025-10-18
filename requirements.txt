@@ -2,7 +2,7 @@ pandas
 numpy
 yfinance
 ta
-scikit-learn
+scikit-learn==1.6.1
 joblib
 rich
 pyarrow
