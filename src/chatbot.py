@@ -11,6 +11,7 @@ SUPPORTED_BOTS: Sequence[str] = (
     "Claude-Sonnet-4.5",
     "GPT-4o",
     "Gemini-2.5-Pro",
+    "DeepSeek-R1",
 )
 DEFAULT_BOT: str = SUPPORTED_BOTS[0]
 
