@@ -34,6 +34,7 @@ class ModelArtifacts:
     cv_metrics: Dict[str, float] | None = None
     model_type: str = "hist_gb"
     model_params: Dict[str, object] | None = None
+    ensemble_members: List[Dict[str, object]] | None = None
 
     def save(self, name: str) -> Path:
         path = MODEL_DIR / f"{name}.joblib"
@@ -222,6 +223,42 @@ def _build_estimator(
         base_params.update(params)
         return RandomForestClassifier(**base_params)
     raise ValueError(f"Unsupported model_type: {model_type}")
+
+
+class ProbabilityAveragingEnsemble(ClassifierMixin):
+    """Simple probability averaging ensemble with optional weights."""
+
+    def __init__(self, models: List[ClassifierMixin], weights: Iterable[float] | None = None) -> None:
+        if not models:
+            raise ValueError("Ensemble requires at least one model.")
+        self.models = models
+        weight_array = np.array(list(weights), dtype=float) if weights is not None else np.ones(len(models))
+        if weight_array.shape[0] != len(models):
+            raise ValueError("Weights length must match number of models.")
+        weight_array = np.clip(weight_array, 1e-6, None)
+        self.weights = weight_array / np.sum(weight_array)
+        self.classes_ = getattr(models[0], "classes_", None)
+        if self.classes_ is None:
+            raise ValueError("Base models must expose classes_.")
+
+    def predict_proba(self, X):
+        probs = None
+        for weight, model in zip(self.weights, self.models):
+            model_probs = model.predict_proba(X)
+            if probs is None:
+                probs = weight * model_probs
+            else:
+                probs += weight * model_probs
+        if probs is None:
+            raise RuntimeError("Ensemble has no models.")
+        row_sums = probs.sum(axis=1, keepdims=True)
+        row_sums[row_sums == 0.0] = 1.0
+        return probs / row_sums
+
+    def predict(self, X):
+        probs = self.predict_proba(X)
+        indices = np.argmax(probs, axis=1)
+        return np.asarray(self.classes_)[indices]
 
 
 def get_market_bias_factors(market: str) -> Dict[str, float]:
@@ -481,20 +518,87 @@ def train_model(
         else:
             print(f"[{model_label}] 无法执行有效的时间序列 CV，采用默认参数: {params}")
 
-    if model_type == "auto":
-        selected = max(candidate_results, key=lambda r: r.get("score", float("-inf")))
-        if selected.get("score", float("-inf")) == float("-inf"):
-            selected = candidate_results[0]
+    candidate_results_sorted = sorted(
+        candidate_results,
+        key=lambda r: r.get("score", float("-inf")),
+        reverse=True,
+    )
+    primary = candidate_results_sorted[0]
+    secondary = candidate_results_sorted[1] if len(candidate_results_sorted) > 1 else None
+
+    use_ensemble = False
+    ensemble_members: List[Dict[str, object]] | None = None
+
+    if model_type == "auto" and secondary:
+        primary_score = primary.get("score", float("-inf"))
+        secondary_score = secondary.get("score", float("-inf"))
+        if (
+            np.isfinite(primary_score)
+            and np.isfinite(secondary_score)
+            and primary.get("cv_summary")
+            and secondary.get("cv_summary")
+            and (primary_score - secondary_score) <= 0.015
+        ):
+            use_ensemble = True
+            ensemble_members = [
+                {
+                    "model_type": primary["model_type"],
+                    "params": primary["best_params"],
+                    "score": float(primary_score),
+                },
+                {
+                    "model_type": secondary["model_type"],
+                    "params": secondary["best_params"],
+                    "score": float(secondary_score),
+                },
+            ]
+
+    if use_ensemble and ensemble_members:
+        selected_type = "ensemble"
+        best_params = {"members": ensemble_members}
+        weights = np.array([member["score"] for member in ensemble_members], dtype=float)
+        weights = np.clip(weights, 0.0, None)
+        if not np.isfinite(weights).any() or weights.sum() == 0.0:
+            weights = np.ones(len(ensemble_members), dtype=float)
+        weights = weights / weights.sum()
+
+        summaries = [primary.get("cv_summary"), secondary.get("cv_summary")]
+        metric_keys = ("macro_precision", "macro_recall", "macro_f1", "accuracy", "hold_recall")
+        cv_metrics_summary: Dict[str, float] | None = {}
+        for key in metric_keys:
+            values = []
+            for summary, weight in zip(summaries, weights):
+                if summary and summary.get(key) is not None:
+                    values.append(weight * float(summary[key]))
+            if values:
+                cv_metrics_summary[key] = float(np.sum(values))
+        if not cv_metrics_summary:
+            cv_metrics_summary = None
+        print(
+            "[model] Using ensemble blend of "
+            f"{ensemble_members[0]['model_type']} + {ensemble_members[1]['model_type']} "
+            f"with weights {weights.round(3).tolist()}"
+        )
+        for member, weight in zip(ensemble_members, weights):
+            print(
+                f"  -> {member['model_type']} params {member['params']} (blend weight {weight:.2f})"
+            )
+            member["weight"] = float(weight)
+        ensemble_weights = weights
     else:
-        selected = next((r for r in candidate_results if r["model_type"] == model_type), None)
-        if selected is None:
-            raise ValueError(f"模型类型 {model_type} 未评估或不可用。")
+        if model_type == "auto":
+            selected = primary if np.isfinite(primary.get("score", float("-inf"))) else candidate_results[0]
+        else:
+            selected = next((r for r in candidate_results if r["model_type"] == model_type), None)
+            if selected is None:
+                raise ValueError(f"模型类型 {model_type} 未评估或不可用。")
+        selected_type = selected["model_type"]
+        best_params = selected["best_params"]
+        cv_metrics_summary = selected.get("cv_summary")
+        print(f"[model] Using {selected_type} with params {best_params}")
+        ensemble_weights = None
 
-    selected_type = selected["model_type"]
-    best_params = selected["best_params"]
-    cv_metrics_summary: Dict[str, float] | None = selected.get("cv_summary")
-
-    print(f"[model] Using {selected_type} with params {best_params}")
+    ensemble_members_for_artifacts = ensemble_members if use_ensemble and ensemble_members else None
 
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X_all)
@@ -520,7 +624,7 @@ def train_model(
                 bias_factors_base[label] = adjusted
 
     optimized_bias_oof: Dict[str, float] | None = None
-    if cv_splits and cv_metrics_summary:
+    if selected_type != "ensemble" and cv_splits and cv_metrics_summary:
         oof_probs: List[np.ndarray] = []
         oof_true: List[np.ndarray] = []
         oof_preds: List[np.ndarray] = []
@@ -593,17 +697,48 @@ def train_model(
             )
             print(f"Optimized bias factors (OOF, {market}): {optimized_bias_oof}")
 
-    base_model = _build_estimator(selected_type, best_params, random_state, final=True)
-    base_model.fit(X_scaled, y_all, sample_weight=sample_weight_all)
+    if selected_type == "ensemble" and ensemble_members_for_artifacts:
+        base_models: List[ClassifierMixin] = []
+        weights_for_models = (
+            np.array(ensemble_weights, dtype=float)
+            if ensemble_weights is not None
+            else np.ones(len(ensemble_members_for_artifacts), dtype=float)
+        )
+        if weights_for_models.sum() <= 0:
+            weights_for_models = np.ones(len(ensemble_members_for_artifacts), dtype=float)
+        for idx, member in enumerate(ensemble_members_for_artifacts):
+            member_type = str(member.get("model_type"))
+            member_params = dict(member.get("params", {}))
+            member_estimator = _build_estimator(
+                member_type,
+                member_params,
+                random_state + (idx * 11),
+                final=True,
+            )
+            member_estimator.fit(X_scaled, y_all, sample_weight=sample_weight_all)
+            if hasattr(member_estimator, "feature_importances_"):
+                importances = member_estimator.feature_importances_
+                top_idx = np.argsort(importances)[::-1][:8]
+                top_features = [f"{FEATURE_COLUMNS[i]}: {importances[i]:.1f}" for i in top_idx]
+                print(
+                    f"Feature importances ({member_type}): " + ", ".join(top_features)
+                )
+            calibrator_member = CalibratedClassifierCV(member_estimator, method="sigmoid", cv=3)
+            calibrator_member.fit(X_scaled, y_all, sample_weight=sample_weight_all)
+            base_models.append(calibrator_member)
+        calibrated_model: ClassifierMixin = ProbabilityAveragingEnsemble(base_models, weights_for_models)
+    else:
+        base_model = _build_estimator(selected_type, best_params, random_state, final=True)
+        base_model.fit(X_scaled, y_all, sample_weight=sample_weight_all)
 
-    if hasattr(base_model, "feature_importances_"):
-        importances = base_model.feature_importances_
-        top_idx = np.argsort(importances)[::-1][:10]
-        top_features = [f"{FEATURE_COLUMNS[i]}: {importances[i]:.1f}" for i in top_idx]
-        print("Top feature importances:", ", ".join(top_features))
+        if hasattr(base_model, "feature_importances_"):
+            importances = base_model.feature_importances_
+            top_idx = np.argsort(importances)[::-1][:10]
+            top_features = [f"{FEATURE_COLUMNS[i]}: {importances[i]:.1f}" for i in top_idx]
+            print("Top feature importances:", ", ".join(top_features))
 
-    calibrated_model = CalibratedClassifierCV(base_model, method="sigmoid", cv=3)
-    calibrated_model.fit(X_scaled, y_all, sample_weight=sample_weight_all)
+        calibrated_model = CalibratedClassifierCV(base_model, method="sigmoid", cv=3)
+        calibrated_model.fit(X_scaled, y_all, sample_weight=sample_weight_all)
 
     bias_factors = bias_factors_base
     if optimized_bias_oof is not None:
@@ -644,6 +779,7 @@ def train_model(
         cv_metrics=cv_metrics_summary,
         model_type=selected_type,
         model_params=best_params,
+        ensemble_members=ensemble_members_for_artifacts,
     )
 
 def predict_signals(dataset: pd.DataFrame, artifacts: ModelArtifacts) -> pd.DataFrame:
@@ -689,4 +825,6 @@ def load_artifacts(name: str) -> ModelArtifacts:
         artifacts.model_type = "hist_gb"
     if not hasattr(artifacts, "model_params"):
         artifacts.model_params = None
+    if not hasattr(artifacts, "ensemble_members"):
+        artifacts.ensemble_members = None
     return artifacts

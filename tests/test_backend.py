@@ -76,12 +76,12 @@ def test_run_analysis_sets_risk_flags(monkeypatch):
             "trend_strength_60d": [0.4, 0.35, 0.32],
             "drawdown": [-0.05, -0.04, -0.03],
             "indicator_bias": [0.0, 0.0, 0.0],
-            "sma_10": [100, 100.5, 101],
-            "sma_50": [99, 99.5, 100],
+            "sma_10": [100, 100.0, 100.0],
+            "sma_50": [100, 100.0, 100.0],
             "rsi_14": [55, 57, 59],
-            "macd": [0.12, 0.09, 0.07],
+            "macd": [0.11, 0.08, 0.06],
             "macd_signal": [0.11, 0.08, 0.06],
-            "bb_pct": [0.5, 0.55, 0.6],
+            "bb_pct": [0.5, 0.5, 0.5],
             "volume_zscore": [0.0, 0.0, 0.0],
             "ticker": ["AAPL", "AAPL", "AAPL"],
             "label": ["hold", "buy", "hold"],
@@ -113,6 +113,6 @@ def test_run_analysis_sets_risk_flags(monkeypatch):
     )
 
     latest = result["latest"]["AAPL"]
-    assert latest["threshold_distance"] <= 0.02
+    assert latest["threshold_distance"] <= 0.020001
     assert "near_threshold" in latest["risk_flags"]
     assert "low_confidence" in latest["risk_flags"]

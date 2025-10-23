@@ -10,11 +10,13 @@
 - 增补趋势强度、均线斜率、价格 Z-Score、布林带偏移、短周期收益等派生特征，兼顾趋势行情与震荡行情的信号稳定性。
 - 训练轻量级机器学习分类模型，以预测短周期收益表现。
 - 支持自动模型选择，在 HistGradientBoosting 与 RandomForest 等候选模型中基于验证集指标择优。
+- 自动模式在多模型性能接近时引入加权集成，提高 A 股与美股场景下的可信度与准确率。
 - 将模型输出与基于规则的技术指标评分融合，生成直观的买入 / 持有 / 卖出信号。
 - 输出简明报告，总结信心水平、支撑指标以及近期表现。
 - Web 控制台支持日/周频切换及并排展示，强调短期收益、概率差、临界风险提示，并输出关键驱动因子与回测表现。
 - 实时搜索支持股票代码与中文名称联想，无需维护别名即可定位对应标的。
 - 引入时间序列交叉验证与梯度提升模型（HistGradientBoosting）评估信号质量，并提供基础回测结果接口。
+- 可选接入 DeepSeek LLM 进行概率融合，强化边缘信号的置信度（需配置 `DEEPSEEK_API_KEY`）。
 
 ## 为什么要做这个工具？
 
@@ -70,10 +72,41 @@ python -m src.cli \
   --lookback-years 5 \
   --resample-frequency daily \
   --model-name default_model_daily \
-  --horizon 12 --threshold 0.05 --adaptive-threshold --train
+ --horizon 12 --threshold 0.05 --adaptive-threshold --train
 ```
 
 训练完成后会生成 `models/default_model_daily.joblib`，后端会在请求日频信号时自动加载该模型。
+
+### DeepSeek 模型融合（可选）
+
+若希望在本地模型基础上结合 DeepSeek LLM 的判断，可按以下步骤开启概率融合流程：
+
+1. 申请 DeepSeek API key，并在运行前导出到环境变量：
+
+   ```bash
+   export DEEPSEEK_API_KEY="your-secret-key"
+   ```
+
+2. 通过 CLI 启用融合模式（默认只针对每个标的的最新一条样本调用 DeepSeek）：
+
+   ```bash
+   python -m src.cli \
+     --tickers AAPL MSFT \
+     --lookback-years 5 \
+     --resample-frequency weekly \
+     --horizon 12 \
+     --threshold 0.06 --adaptive-threshold \
+     --use-deepseek --deepseek-weight 0.35
+   ```
+
+   可选参数包括 `--deepseek-model`（默认 `deepseek-chat`）、`--deepseek-process-all`（处理全部样本）、
+   `--deepseek-max-rows` 与 `--deepseek-timeout`。
+
+3. 若使用 Web Server，可设置 `ENABLE_DEEPSEEK_FUSION=1` 以及相关权重/模型环境变量，
+   服务端会在有 `DEEPSEEK_API_KEY` 时自动融合 DeepSeek 反馈。
+
+DeepSeek 会输出结构化的 `label/confidence/reason`，系统会根据设定权重与本地模型概率进行再平衡，
+帮助过滤低置信度信号或放大边缘机会。
 
 ## 进阶分析
 
