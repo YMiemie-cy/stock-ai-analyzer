@@ -54,6 +54,43 @@ YAHOO_LOOKUP_HEADERS = {
     "Referer": "https://finance.yahoo.com/",
 }
 SINA_LOOKUP_TEMPLATE = "https://suggest3.sinajs.cn/suggest/type=11,12,13,14,15&key={key}"
+EASTMONEY_LOOKUP_URL = "https://searchapi.eastmoney.com/api/suggest/get"
+EASTMONEY_LOOKUP_TYPE = "14"
+EASTMONEY_LOOKUP_TOKEN = "D43BF722C8E33BDC906FB84D85E326E8"
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+DEEPSEEK_FUSION_ENABLED = _env_flag("ENABLE_DEEPSEEK_FUSION", False)
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL")
+DEEPSEEK_WEIGHT = _env_float("DEEPSEEK_WEIGHT", 0.35)
+DEEPSEEK_PROCESS_ALL = _env_flag("DEEPSEEK_PROCESS_ALL", False)
+DEEPSEEK_MAX_ROWS = _env_int("DEEPSEEK_MAX_ROWS", 60)
+DEEPSEEK_TIMEOUT = _env_float("DEEPSEEK_TIMEOUT", 25.0)
 
 _ANALYSIS_CACHE: "OrderedDict[tuple, Dict[str, Any]]" = OrderedDict()
 _REALTIME_CACHE: Dict[str, Dict[str, Any]] = {}
@@ -73,6 +110,15 @@ LATEST_RESULT_FIELDS = {
     "indicator_bias",
     "price",
     "model_signal",
+    "prob_buy_local",
+    "prob_hold_local",
+    "prob_sell_local",
+    "prob_buy_deepseek",
+    "prob_hold_deepseek",
+    "prob_sell_deepseek",
+    "deepseek_label",
+    "deepseek_confidence",
+    "deepseek_reason",
     "return_1d",
     "return_3d",
     "return_5d",
@@ -348,6 +394,17 @@ def get_or_run_analysis(
             _ANALYSIS_CACHE.move_to_end(cache_key, last=True)
             return cached["results"]
 
+    deepseek_options = None
+    if DEEPSEEK_FUSION_ENABLED:
+        deepseek_options = {
+            "weight": DEEPSEEK_WEIGHT,
+            "latest_only": not DEEPSEEK_PROCESS_ALL,
+            "max_rows": DEEPSEEK_MAX_ROWS,
+            "timeout": DEEPSEEK_TIMEOUT,
+        }
+        if DEEPSEEK_MODEL:
+            deepseek_options["model"] = DEEPSEEK_MODEL
+
     results = run_analysis(
         tickers=tickers,
         lookback_years=lookback_years,
@@ -361,6 +418,7 @@ def get_or_run_analysis(
         model_type=model_type,
         train=train,
         console=None,
+        deepseek_options=deepseek_options,
     )
 
     if not train:
@@ -416,6 +474,7 @@ def transform_results(
             "max_threshold": meta.get("max_threshold"),
             "adaptive_threshold": meta.get("adaptive_threshold"),
             "requested_tickers": meta.get("requested_tickers", []),
+            "deepseek": meta.get("deepseek"),
             "realtime_timestamp": realtime_fetch_ts,
         },
         "tickers": [],
@@ -540,6 +599,43 @@ def _normalize_sina_symbol(raw: str) -> Optional[str]:
     return None
 
 
+def _normalize_eastmoney_symbol(entry: Dict[str, Any]) -> Optional[str]:
+    code = str(entry.get("Code") or "").strip()
+    if not code:
+        return None
+    classify = str(entry.get("Classify") or "").lower()
+    security_type = str(entry.get("SecurityTypeName") or "")
+    quote_id = str(entry.get("QuoteID") or "")
+    prefix = ""
+    if "." in quote_id:
+        prefix = quote_id.split(".", 1)[0]
+
+    def _normalize_astock() -> Optional[str]:
+        suffix = None
+        if prefix == "1":
+            suffix = "SS"
+        elif prefix == "0":
+            suffix = "SZ"
+        elif prefix in {"8", "9"}:
+            suffix = "BJ"
+        if suffix is None:
+            if "沪" in security_type:
+                suffix = "SS"
+            elif "深" in security_type:
+                suffix = "SZ"
+            elif "京" in security_type or "北" in security_type:
+                suffix = "BJ"
+        return f"{code}.{suffix}" if suffix else None
+
+    if classify == "astock":
+        return _normalize_astock()
+    if classify in {"hk", "hkstock"} or "港" in security_type:
+        return f"{code}.HK"
+    if classify in {"usstock", "usestock"} or "美" in security_type:
+        return code.upper()
+    return None
+
+
 async def _lookup_yahoo_source(query: str, seen_symbols: Set[str]) -> List[Dict[str, Any]]:
     params = {
         "q": query,
@@ -590,6 +686,7 @@ async def _lookup_yahoo_source(query: str, seen_symbols: Set[str]) -> List[Dict[
 
 
 async def _lookup_sina_source(query: str, seen_symbols: Set[str]) -> List[Dict[str, Any]]:
+    query_lower = query.lower()
     try:
         encoded = urllib.parse.quote_from_bytes(query.encode("gbk"))
     except UnicodeEncodeError:
@@ -621,6 +718,10 @@ async def _lookup_sina_source(query: str, seen_symbols: Set[str]) -> List[Dict[s
         fields = entry.split(",")
         if len(fields) < 4:
             continue
+        candidates = [fields[4], fields[6] if len(fields) > 6 else None, fields[0], fields[2], fields[3]]
+        matched = any((candidate or "").lower().find(query_lower) != -1 for candidate in candidates if candidate)
+        if not matched:
+            continue
         normalized_symbol = _normalize_sina_symbol(fields[3])
         if not normalized_symbol or normalized_symbol in seen_symbols:
             continue
@@ -637,6 +738,47 @@ async def _lookup_sina_source(query: str, seen_symbols: Set[str]) -> List[Dict[s
                 "exchange": exchange,
                 "type": "EQUITY",
                 "score": 75.0,
+            }
+        )
+        if len(results) >= LOOKUP_LIMIT:
+            break
+    return results
+
+
+async def _lookup_eastmoney_source(query: str, seen_symbols: Set[str]) -> List[Dict[str, Any]]:
+    params = {
+        "input": query,
+        "type": EASTMONEY_LOOKUP_TYPE,
+        "token": EASTMONEY_LOOKUP_TOKEN,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            response = await client.get(EASTMONEY_LOOKUP_URL, params=params)
+            response.raise_for_status()
+    except httpx.HTTPError as exc:  # pragma: no cover - network error
+        raise HTTPException(status_code=502, detail=f"代码搜索失败：{exc}") from exc
+
+    payload = response.json() or {}
+    table = payload.get("QuotationCodeTable") or {}
+    entries = table.get("Data") or []
+    results: List[Dict[str, Any]] = []
+    for item in entries:
+        normalized_symbol = _normalize_eastmoney_symbol(item)
+        if not normalized_symbol or normalized_symbol in seen_symbols:
+            continue
+        seen_symbols.add(normalized_symbol)
+        short_name = item.get("Name") or item.get("Code")
+        exchange = item.get("SecurityTypeName") or item.get("JYS")
+        display_symbol = normalized_symbol if "." in normalized_symbol else item.get("Code")
+        results.append(
+            {
+                "symbol": normalized_symbol,
+                "display_symbol": display_symbol,
+                "short_name": short_name,
+                "long_name": short_name,
+                "exchange": exchange,
+                "type": item.get("Classify"),
+                "score": 70.0,
             }
         )
         if len(results) >= LOOKUP_LIMIT:
@@ -678,6 +820,11 @@ async def _perform_symbol_lookup(query: str) -> List[Dict[str, Any]]:
             results.extend(await _lookup_yahoo_source(query, seen_symbols))
         except HTTPException as exc:
             errors.append(exc)
+        if len(results) < LOOKUP_LIMIT:
+            try:
+                results.extend(await _lookup_eastmoney_source(query, seen_symbols))
+            except HTTPException as exc:
+                errors.append(exc)
     else:
         try:
             results.extend(await _lookup_sina_source(query, seen_symbols))
@@ -686,6 +833,11 @@ async def _perform_symbol_lookup(query: str) -> List[Dict[str, Any]]:
                 _LOOKUP_CACHE[cache_key] = (now, results)
                 return results
             errors.append(exc)
+        if len(results) < LOOKUP_LIMIT:
+            try:
+                results.extend(await _lookup_eastmoney_source(query, seen_symbols))
+            except HTTPException as exc:
+                errors.append(exc)
         if len(results) < LOOKUP_LIMIT:
             try:
                 results.extend(await _lookup_yahoo_source(query, seen_symbols))

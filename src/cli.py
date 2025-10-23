@@ -87,6 +87,44 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="输出模型在当前数据集上的分类报告与混淆矩阵，供效果评估。",
     )
+    parser.add_argument(
+        "--use-deepseek",
+        action="store_true",
+        help="启用 DeepSeek 模型融合（需提供 DEEPSEEK_API_KEY 或 --deepseek-api-key）。",
+    )
+    parser.add_argument(
+        "--deepseek-api-key",
+        default=None,
+        help="DeepSeek API key，若省略则回退到环境变量 DEEPSEEK_API_KEY。",
+    )
+    parser.add_argument(
+        "--deepseek-model",
+        default=None,
+        help="DeepSeek 模型名称（默认 deepseek-chat）。",
+    )
+    parser.add_argument(
+        "--deepseek-weight",
+        type=float,
+        default=0.35,
+        help="DeepSeek 结果在概率融合中的权重（0-1，默认 0.35）。",
+    )
+    parser.add_argument(
+        "--deepseek-process-all",
+        action="store_true",
+        help="对每个标的的全部样本调用 DeepSeek（默认只处理最新一条记录）。",
+    )
+    parser.add_argument(
+        "--deepseek-max-rows",
+        type=int,
+        default=60,
+        help="DeepSeek 单次最多处理的样本数（默认 60）。",
+    )
+    parser.add_argument(
+        "--deepseek-timeout",
+        type=float,
+        default=25.0,
+        help="DeepSeek API 请求超时时间（秒）。",
+    )
     return parser.parse_args()
 
 
@@ -96,6 +134,18 @@ def main() -> None:
     console.print(
         f"Preparing dataset for tickers: {', '.join(args.tickers)} | Lookback: {args.lookback_years} years"
     )
+
+    deepseek_options = None
+    if args.use_deepseek or args.deepseek_api_key:
+        deepseek_options = {
+            "api_key": args.deepseek_api_key,
+            "weight": args.deepseek_weight,
+            "latest_only": not args.deepseek_process_all,
+            "max_rows": args.deepseek_max_rows,
+            "timeout": args.deepseek_timeout,
+        }
+        if args.deepseek_model:
+            deepseek_options["model"] = args.deepseek_model
 
     analysis = run_analysis(
         tickers=args.tickers,
@@ -110,6 +160,7 @@ def main() -> None:
         model_type=args.model_type,
         train=args.train,
         console=console,
+        deepseek_options=deepseek_options,
     )
 
     meta = analysis["meta"]

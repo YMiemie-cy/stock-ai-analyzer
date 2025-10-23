@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import datetime as dt
 import math
+import os
 from collections import OrderedDict
 from numbers import Number
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import pandas as pd
 from rich.console import Console
@@ -138,9 +139,81 @@ def run_analysis(
     model_type: str = "auto",
     train: bool = False,
     console: Optional[Console] = None,
+    deepseek_options: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, object]:
     """Execute the full analysis pipeline and return structured results."""
     freq_code = "D" if resample_frequency.lower() == "daily" else "W"
+    deepseek_options = deepseek_options or {}
+    deepseek_enabled = False
+    deepseek_config = None
+    deepseek_client = None
+    deepseek_owned_client = False
+    deepseek_error: str | None = None
+    apply_deepseek_fusion = None
+
+    if deepseek_options:
+        try:
+            from .deepseek import (  # type: ignore import-not-found
+                DEFAULT_DEEPSEEK_MODEL,
+                DeepseekClient,
+                DeepseekConfig,
+                apply_deepseek_fusion as _apply_deepseek_fusion,
+            )
+        except Exception as exc:  # pragma: no cover - import failure
+            deepseek_error = f"Failed to import DeepSeek helpers: {exc}"
+        else:
+            apply_deepseek_fusion = _apply_deepseek_fusion
+            options = dict(deepseek_options)
+            config_candidate = options.get("config")
+            if isinstance(config_candidate, DeepseekConfig):
+                deepseek_config = config_candidate
+            else:
+                api_key = options.get("api_key") or os.environ.get("DEEPSEEK_API_KEY")
+                if api_key:
+                    weight = options.get("weight", 0.35)
+                    try:
+                        weight = float(weight)
+                    except (TypeError, ValueError):
+                        weight = 0.35
+                    latest_only = bool(options.get("latest_only", True))
+                    timeout = options.get("timeout", 25.0)
+                    try:
+                        timeout = float(timeout)
+                    except (TypeError, ValueError):
+                        timeout = 25.0
+                    max_rows = options.get("max_rows", 60)
+                    try:
+                        max_rows = int(max_rows)
+                    except (TypeError, ValueError):
+                        max_rows = 60
+                    deepseek_config = DeepseekConfig(
+                        api_key=api_key,
+                        model=str(options.get("model") or DEFAULT_DEEPSEEK_MODEL),
+                        base_url=str(options.get("base_url") or "https://api.deepseek.com"),
+                        temperature=float(options.get("temperature", 0.2) or 0.2),
+                        top_p=float(options.get("top_p", 0.85) or 0.85),
+                        timeout=timeout,
+                        weight=max(0.0, min(1.0, weight)),
+                        latest_only=latest_only,
+                        max_rows=max_rows,
+                    )
+            client_candidate = options.get("client")
+            if deepseek_config:
+                if isinstance(client_candidate, DeepseekClient):
+                    deepseek_client = client_candidate
+                elif client_candidate is None:
+                    try:
+                        deepseek_client = DeepseekClient(deepseek_config)
+                        deepseek_owned_client = True
+                    except Exception as exc:  # pragma: no cover - network init
+                        deepseek_error = f"Failed to initialise DeepSeek client: {exc}"
+                        deepseek_client = None
+                else:
+                    deepseek_error = "Invalid DeepSeek client provided."
+            elif options.get("api_key") or os.environ.get("DEEPSEEK_API_KEY"):
+                deepseek_error = "DeepSeek API key provided but configuration could not be constructed."
+
+            deepseek_enabled = bool(deepseek_client and deepseek_config and apply_deepseek_fusion)
 
     normalized_tickers, ticker_mapping, invalid_inputs = normalize_tickers(tickers)
     if not normalized_tickers:
@@ -205,6 +278,19 @@ def run_analysis(
             model_type=model_type,
         )
         predictions = predict_signals(dataset_market, artifacts)
+        if deepseek_enabled and apply_deepseek_fusion and deepseek_client and deepseek_config:
+            ds_meta_context = {
+                "horizon": horizon,
+                "resample_frequency": resample_frequency,
+                "threshold": threshold_market,
+                "market": market,
+            }
+            predictions = apply_deepseek_fusion(
+                predictions,
+                client=deepseek_client,
+                config=deepseek_config,
+                meta=ds_meta_context,
+            )
         predictions_list.append(predictions)
         model_type_by_market[market] = getattr(artifacts, "model_type", model_type)
 
@@ -217,6 +303,12 @@ def run_analysis(
 
     dataset = pd.concat(datasets)
     predictions = pd.concat(predictions_list)
+
+    if deepseek_owned_client and deepseek_client and hasattr(deepseek_client, "close"):
+        try:
+            deepseek_client.close()
+        except Exception:  # pragma: no cover - close failures are non-critical
+            pass
 
     data_start = dataset["date"].min()
     data_end = dataset["date"].max()
@@ -347,7 +439,7 @@ def run_analysis(
             decision_value = str(latest_row.get("decision", "")).lower()
             is_near_threshold = False
             if decision_value == "hold" and isinstance(threshold_distance, Number) and math.isfinite(threshold_distance):
-                is_near_threshold = threshold_distance <= 0.02
+                is_near_threshold = threshold_distance <= 0.0200005
             latest_row["is_near_threshold"] = is_near_threshold
 
             risk_flags: List[str] = []
@@ -428,6 +520,13 @@ def run_analysis(
         "market_by_ticker": {
             ticker_mapping.get(t, t): market_lookup.get(t, "global") for t in normalized_tickers
         },
+    }
+    meta["deepseek"] = {
+        "enabled": deepseek_enabled,
+        "model": getattr(deepseek_config, "model", None) if deepseek_enabled else None,
+        "weight": getattr(deepseek_config, "weight", None) if deepseek_enabled else None,
+        "latest_only": getattr(deepseek_config, "latest_only", None) if deepseek_enabled else None,
+        "error": deepseek_error,
     }
 
     return {

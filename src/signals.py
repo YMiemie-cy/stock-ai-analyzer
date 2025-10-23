@@ -95,4 +95,18 @@ def generate_signal_report(dataset: pd.DataFrame) -> pd.DataFrame:
         },
         index=working.index,
     )
+    optional_cols = [
+        "prob_buy_local",
+        "prob_hold_local",
+        "prob_sell_local",
+        "prob_buy_deepseek",
+        "prob_hold_deepseek",
+        "prob_sell_deepseek",
+        "deepseek_label",
+        "deepseek_confidence",
+        "deepseek_reason",
+    ]
+    for col in optional_cols:
+        if col in working.columns:
+            report[col] = working[col]
     return report
