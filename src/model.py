@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional
 
 import numpy as np
 import joblib
@@ -17,6 +17,7 @@ from sklearn.metrics import classification_report, accuracy_score, f1_score, rec
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.calibration import CalibratedClassifierCV
+from sklearn.linear_model import LogisticRegression
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / "models"
 MODEL_DIR.mkdir(exist_ok=True)
@@ -35,6 +36,9 @@ class ModelArtifacts:
     model_type: str = "hist_gb"
     model_params: Dict[str, object] | None = None
     ensemble_members: List[Dict[str, object]] | None = None
+    meta_scaler: Optional[StandardScaler] = None
+    meta_model: Optional[ClassifierMixin] = None
+    meta_feature_specs: Optional[List[Dict[str, str]]] = None
 
     def save(self, name: str) -> Path:
         path = MODEL_DIR / f"{name}.joblib"
@@ -129,6 +133,17 @@ FEATURE_COLUMNS = [
     "macro_us10y_level",
     "macro_us10y_pct_change_5d",
     "macro_us10y_zscore_60d",
+    "macro_vix_ema_ratio_30",
+    "macro_dxy_ema_ratio_30",
+    "macro_us10y_ema_ratio_30",
+    "macro_liquidity_spread",
+    "macro_risk_spread",
+    "macro_vix_to_us10y",
+    "regime_volatility",
+    "regime_trend",
+    "regime_risk_on",
+    "regime_score",
+    "trend_alignment_score",
     "range_pct",
     "gap_pct",
     "volume_trend_60d",
@@ -602,7 +617,14 @@ def train_model(
 
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X_all)
-    sample_weight_all = y_all.map(class_weight).values
+    meta_conf_series = dataset_sorted.get("meta_signal_confidence")
+    meta_active_series = dataset_sorted.get("meta_signal_active")
+    sample_weight_all = y_all.map(class_weight).astype(float)
+    if meta_conf_series is not None:
+        sample_weight_all = sample_weight_all * (1.0 + meta_conf_series.clip(0.0, 3.0) * 0.2)
+    if meta_active_series is not None:
+        sample_weight_all = sample_weight_all * (1.0 + meta_active_series.clip(0, 1) * 0.1)
+    sample_weight_all = sample_weight_all.values
     class_priors = (
         y_all.value_counts(normalize=True)
         .reindex(sorted(y_all.unique()), fill_value=0.0)
@@ -639,7 +661,16 @@ def train_model(
             X_train_scaled = scaler_cv.fit_transform(X_train)
             X_valid_scaled = scaler_cv.transform(X_valid)
 
-            sample_weight_train = y_train.map(class_weight).values
+            sample_weight_train = y_train.map(class_weight).astype(float)
+            if meta_conf_series is not None:
+                sample_weight_train = sample_weight_train * (
+                    1.0 + meta_conf_series.iloc[train_idx].clip(0.0, 3.0) * 0.2
+                )
+            if meta_active_series is not None:
+                sample_weight_train = sample_weight_train * (
+                    1.0 + meta_active_series.iloc[train_idx].clip(0, 1) * 0.1
+                )
+            sample_weight_train = sample_weight_train.values
             base_estimator = _build_estimator(selected_type, best_params, random_state, final=True)
             calibrated_cv = CalibratedClassifierCV(base_estimator, method="sigmoid", cv=3)
             calibrated_cv.fit(X_train_scaled, y_train, sample_weight=sample_weight_train)
@@ -770,6 +801,65 @@ def train_model(
         except Exception as exc:
             print(f"Bias optimization skipped ({market}): {exc}")
 
+    meta_scaler = None
+    meta_model = None
+    meta_feature_specs: List[Dict[str, str]] | None = None
+    meta_target = dataset_sorted.get("meta_signal_active")
+    if meta_target is not None:
+        meta_target = meta_target.fillna(0).astype(int)
+        positive_count = int(meta_target.sum())
+        if positive_count >= max(12, int(len(meta_target) * 0.015)):
+            try:
+                class_index_map = {str(cls): idx for idx, cls in enumerate(calibrated_model.classes_)}
+                base_probs_train = calibrated_model.predict_proba(X_scaled)
+                meta_features: Dict[str, np.ndarray] = {}
+                meta_feature_specs = []
+                for label, idx in class_index_map.items():
+                    col_name = f"meta_prob_{label}"
+                    meta_features[col_name] = base_probs_train[:, idx]
+                    meta_feature_specs.append({"kind": "prob", "label": str(label), "name": col_name})
+
+                candidate_cols = [
+                    "meta_signal_confidence",
+                    "regime_score",
+                    "regime_volatility",
+                    "regime_trend",
+                    "macro_liquidity_spread",
+                    "macro_risk_spread",
+                    "macro_vix_to_us10y",
+                    "trend_alignment_score",
+                ]
+                for column in candidate_cols:
+                    if column in dataset_sorted.columns:
+                        col_name = f"meta_col_{column}"
+                        meta_features[col_name] = dataset_sorted[column].fillna(0.0).to_numpy()
+                        meta_feature_specs.append({"kind": "column", "column": column, "name": col_name})
+
+                meta_df = pd.DataFrame(meta_features, index=dataset_sorted.index)
+                meta_scaler = StandardScaler()
+                meta_X = meta_scaler.fit_transform(meta_df)
+                meta_y = meta_target.values
+                sample_weight_meta = np.ones_like(meta_y, dtype=float)
+                if meta_conf_series is not None:
+                    sample_weight_meta = sample_weight_meta * (1.0 + meta_conf_series.clip(0.0, 3.0) * 0.1)
+                if meta_active_series is not None:
+                    sample_weight_meta = sample_weight_meta * (1.0 + meta_active_series.clip(0, 1) * 0.05)
+
+                logistic = LogisticRegression(max_iter=400, class_weight="balanced")
+                logistic.fit(meta_X, meta_y, sample_weight=sample_weight_meta)
+                meta_model = logistic
+                print(
+                    f"[meta] Trained meta-signal model on {len(meta_y)} samples"
+                    f" (positive={positive_count})"
+                )
+            except Exception as exc:
+                meta_scaler = None
+                meta_model = None
+                meta_feature_specs = None
+                print(f"[meta] Meta model training skipped: {exc}")
+        else:
+            print(f"[meta] Positive meta labels不足（{positive_count}），跳过训练 meta 模型")
+
     return ModelArtifacts(
         scaler=scaler,
         model=calibrated_model,
@@ -780,6 +870,9 @@ def train_model(
         model_type=selected_type,
         model_params=best_params,
         ensemble_members=ensemble_members_for_artifacts,
+        meta_scaler=meta_scaler,
+        meta_model=meta_model,
+        meta_feature_specs=meta_feature_specs,
     )
 
 def predict_signals(dataset: pd.DataFrame, artifacts: ModelArtifacts) -> pd.DataFrame:
@@ -805,6 +898,44 @@ def predict_signals(dataset: pd.DataFrame, artifacts: ModelArtifacts) -> pd.Data
     result["prob_buy"] = probs[:, class_index.get("buy", 0)]
     result["prob_sell"] = probs[:, class_index.get("sell", 0)]
     result["prob_hold"] = probs[:, class_index.get("hold", 0)]
+    if (
+        artifacts.meta_model is not None
+        and artifacts.meta_scaler is not None
+        and artifacts.meta_feature_specs
+    ):
+        meta_feature_data: Dict[str, np.ndarray] = {}
+        for spec in artifacts.meta_feature_specs:
+            name = spec.get("name")
+            if not name:
+                continue
+            kind = spec.get("kind")
+            if kind == "prob":
+                label = spec.get("label")
+                idx = class_index.get(label) if label is not None else None
+                meta_feature_data[name] = probs[:, idx] if idx is not None else np.zeros(len(dataset))
+            elif kind == "column":
+                column = spec.get("column")
+                if column and column in dataset.columns:
+                    meta_feature_data[name] = dataset[column].to_numpy()
+                else:
+                    meta_feature_data[name] = np.zeros(len(dataset))
+        if meta_feature_data:
+            meta_df = pd.DataFrame(meta_feature_data, index=dataset.index).fillna(0.0)
+            meta_matrix = artifacts.meta_scaler.transform(meta_df)
+            try:
+                meta_probs = artifacts.meta_model.predict_proba(meta_matrix)[:, 1]
+            except AttributeError:
+                meta_probs = artifacts.meta_model.predict(meta_matrix)
+            result["meta_signal_prob"] = meta_probs
+            result["meta_signal_prediction"] = (meta_probs >= 0.45).astype(int)
+    for extra_col in (
+        "meta_signal_active",
+        "meta_signal_confidence",
+        "meta_signal_magnitude",
+        "meta_signal_direction",
+    ):
+        if extra_col in dataset.columns:
+            result[extra_col] = dataset[extra_col]
     return result
 
 

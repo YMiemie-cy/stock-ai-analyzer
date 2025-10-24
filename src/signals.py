@@ -36,6 +36,17 @@ def generate_signal_report(dataset: pd.DataFrame) -> pd.DataFrame:
     working = dataset.copy()
     indicator_df = _indicator_scores(working)
 
+    if {"prob_buy", "prob_hold", "prob_sell"}.issubset(working.columns) and "meta_signal_prob" in working.columns:
+        quality = working["meta_signal_prob"].astype(float).clip(lower=0.0, upper=1.0).fillna(0.0)
+        buy_adj = working["prob_buy"] * (0.55 + 0.45 * quality)
+        sell_adj = working["prob_sell"] * (0.55 + 0.45 * quality)
+        hold_adj = working["prob_hold"] * (0.85 - 0.35 * quality)
+        total = buy_adj + sell_adj + hold_adj
+        total = total.replace(0.0, np.nan)
+        working.loc[:, "prob_buy"] = (buy_adj / total).fillna(working["prob_buy"])
+        working.loc[:, "prob_sell"] = (sell_adj / total).fillna(working["prob_sell"])
+        working.loc[:, "prob_hold"] = (hold_adj / total).fillna(working["prob_hold"])
+
     probs = working[["prob_buy", "prob_hold", "prob_sell"]].to_numpy()
     sorted_probs = np.sort(probs, axis=1)
     probability_gap = sorted_probs[:, -1] - sorted_probs[:, -2]
@@ -90,9 +101,12 @@ def generate_signal_report(dataset: pd.DataFrame) -> pd.DataFrame:
             "volatility_20d": working.get("volatility_20d"),
             "volatility_60d": working.get("volatility_60d"),
             "trend_strength_20d": working.get("trend_strength_20d"),
-            "trend_strength_60d": working.get("trend_strength_60d"),
-            "drawdown": working.get("drawdown"),
-        },
+        "trend_strength_60d": working.get("trend_strength_60d"),
+        "drawdown": working.get("drawdown"),
+        "meta_signal_prob": working.get("meta_signal_prob"),
+        "meta_signal_prediction": working.get("meta_signal_prediction"),
+        "meta_signal_confidence": working.get("meta_signal_confidence"),
+    },
         index=working.index,
     )
     optional_cols = [

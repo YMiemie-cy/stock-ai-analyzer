@@ -489,6 +489,7 @@ def build_feature_frame(price_data: PriceData, horizon: int = 5) -> pd.DataFrame
             df[f"macro_{macro_key}_level"] = np.nan
             df[f"macro_{macro_key}_pct_change_5d"] = np.nan
             df[f"macro_{macro_key}_zscore_60d"] = np.nan
+            df[f"macro_{macro_key}_ema_ratio_30"] = np.nan
             continue
         aligned = series.reindex(df.index).ffill().bfill()
         df[f"macro_{macro_key}_level"] = aligned
@@ -499,6 +500,33 @@ def build_feature_frame(price_data: PriceData, horizon: int = 5) -> pd.DataFrame
         rolling_std = aligned.rolling(60, min_periods=20).std()
         zscore = (aligned - rolling_mean) / rolling_std
         df[f"macro_{macro_key}_zscore_60d"] = zscore.replace([np.inf, -np.inf], np.nan)
+        ema_30 = aligned.ewm(span=30, adjust=False, min_periods=10).mean()
+        ratio_ema = aligned / ema_30 - 1.0
+        df[f"macro_{macro_key}_ema_ratio_30"] = ratio_ema.replace([np.inf, -np.inf], np.nan)
+
+    df["macro_liquidity_spread"] = (
+        df.get("macro_us10y_pct_change_5d", 0.0) - df.get("macro_vix_pct_change_5d", 0.0)
+    )
+    df["macro_risk_spread"] = (
+        df.get("macro_vix_zscore_60d", 0.0) - df.get("macro_dxy_zscore_60d", 0.0)
+    )
+    df["macro_vix_to_us10y"] = (
+        df.get("macro_vix_zscore_60d", 0.0) - df.get("macro_us10y_zscore_60d", 0.0)
+    )
+
+    vol_ratio = df["volatility_ratio"].replace([np.inf, -np.inf], np.nan).fillna(1.0)
+    trend_strength = df["trend_strength_20d"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    risk_on = (-df.get("macro_vix_zscore_60d", pd.Series(0.0, index=df.index))).fillna(0.0)
+
+    df["regime_volatility"] = np.clip(vol_ratio - 1.0, -2.5, 2.5)
+    df["regime_trend"] = np.clip(trend_strength, -3.0, 3.0)
+    df["regime_risk_on"] = np.clip(risk_on, -3.0, 3.0)
+    df["regime_score"] = (
+        0.4 * df["regime_volatility"]
+        + 0.35 * df["regime_trend"]
+        + 0.25 * df["regime_risk_on"]
+    )
+    df["trend_alignment_score"] = np.sign(df["return_20d"].fillna(0.0)) * np.sign(trend_strength)
 
     fill_zero_cols = [
         "bench_return_5d",
@@ -555,12 +583,21 @@ def build_feature_frame(price_data: PriceData, horizon: int = 5) -> pd.DataFrame
         "price_to_bollinger_band",
         "ema_20_slope_5d",
         "ema_50_slope_5d",
+        "macro_liquidity_spread",
+        "macro_risk_spread",
+        "macro_vix_to_us10y",
+        "regime_volatility",
+        "regime_trend",
+        "regime_risk_on",
+        "regime_score",
+        "trend_alignment_score",
     ]
     for macro_key in MACRO_SERIES:
         zero_fill_cols.extend(
             [
                 f"macro_{macro_key}_pct_change_5d",
                 f"macro_{macro_key}_zscore_60d",
+                f"macro_{macro_key}_ema_ratio_30",
             ]
         )
     for col in zero_fill_cols:
@@ -639,6 +676,15 @@ def label_signals(
     df.loc[future_return >= threshold_series, "label"] = "buy"
     df.loc[future_return <= -threshold_series, "label"] = "sell"
     df["label_available"] = label_available
+
+    abs_future = future_return.abs()
+    meta_threshold = threshold_series * 1.15
+    meta_threshold = meta_threshold.replace(0.0, threshold)
+    df["meta_signal_active"] = ((abs_future >= meta_threshold).astype(int)).where(label_available, 0)
+    df["meta_signal_magnitude"] = future_return
+    confidence_ratio = (abs_future / meta_threshold.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
+    df["meta_signal_confidence"] = confidence_ratio.fillna(0.0).clip(0.0, 5.0)
+    df["meta_signal_direction"] = np.sign(future_return).fillna(0.0)
     return df
 
 

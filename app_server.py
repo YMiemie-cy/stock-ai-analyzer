@@ -91,6 +91,8 @@ DEEPSEEK_WEIGHT = _env_float("DEEPSEEK_WEIGHT", 0.35)
 DEEPSEEK_PROCESS_ALL = _env_flag("DEEPSEEK_PROCESS_ALL", False)
 DEEPSEEK_MAX_ROWS = _env_int("DEEPSEEK_MAX_ROWS", 60)
 DEEPSEEK_TIMEOUT = _env_float("DEEPSEEK_TIMEOUT", 25.0)
+DEFAULT_SCENARIO_SHOCKS = (-0.06, -0.03, 0.0, 0.03, 0.06)
+DEFAULT_BRIEFING_TOP = 5
 
 _ANALYSIS_CACHE: "OrderedDict[tuple, Dict[str, Any]]" = OrderedDict()
 _REALTIME_CACHE: Dict[str, Dict[str, Any]] = {}
@@ -136,6 +138,12 @@ LATEST_RESULT_FIELDS = {
     "signal_changed_at",
     "signal_age_days",
     "signal_is_recent",
+    "meta_signal_prob",
+    "meta_signal_prediction",
+    "meta_signal_confidence",
+    "meta_signal_active",
+    "meta_signal_magnitude",
+    "meta_signal_direction",
     "is_near_threshold",
     "risk_flags",
     "key_drivers",
@@ -160,6 +168,9 @@ HISTORY_RESULT_FIELDS = {
     "return_10d",
     "return_20d",
     "return_60d",
+    "meta_signal_prob",
+    "meta_signal_confidence",
+    "meta_signal_prediction",
 }
 
 
@@ -176,6 +187,13 @@ class AnalyzeRequest(BaseModel):
     model_name: str = "default_model"
     model_type: str = "auto"
     train: bool = False
+    risk_profile: str = "balanced"
+    risk_max_drawdown: Optional[float] = None
+    risk_target_volatility: Optional[float] = None
+    scenario_shocks: List[float] = Field(default_factory=lambda: list(DEFAULT_SCENARIO_SHOCKS))
+    briefing_top: int = Field(default=DEFAULT_BRIEFING_TOP, ge=1, le=15)
+    include_briefing: bool = True
+    portfolio_path: Optional[str] = None
 
 
 def _download_realtime_batch(
@@ -337,6 +355,12 @@ def _analysis_cache_key(
     resample_frequency: str,
     model_name: str,
     model_type: str,
+    risk_profile: str,
+    risk_max_drawdown: Optional[float],
+    risk_target_volatility: Optional[float],
+    scenario_shocks: Optional[List[float]],
+    include_briefing: bool,
+    briefing_top: int,
 ) -> tuple:
     return (
         tuple(tickers),
@@ -349,6 +373,12 @@ def _analysis_cache_key(
         resample_frequency,
         model_name,
         model_type,
+        risk_profile,
+        None if risk_max_drawdown is None else round(risk_max_drawdown, 6),
+        None if risk_target_volatility is None else round(risk_target_volatility, 6),
+        tuple(round(x, 6) for x in scenario_shocks) if scenario_shocks else None,
+        include_briefing,
+        briefing_top,
     )
 
 
@@ -365,6 +395,13 @@ def get_or_run_analysis(
     model_name: str,
     model_type: str,
     train: bool,
+    risk_profile: str = "balanced",
+    risk_max_drawdown: Optional[float] = None,
+    risk_target_volatility: Optional[float] = None,
+    scenario_shocks: Optional[List[float]] = None,
+    include_briefing: bool = True,
+    briefing_top: int = DEFAULT_BRIEFING_TOP,
+    portfolio_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     freq_norm = (resample_frequency or "weekly").lower()
     model_name_effective = model_name
@@ -385,6 +422,12 @@ def get_or_run_analysis(
         resample_frequency=resample_frequency,
         model_name=model_name_effective,
         model_type=model_type,
+        risk_profile=risk_profile,
+        risk_max_drawdown=risk_max_drawdown,
+        risk_target_volatility=risk_target_volatility,
+        scenario_shocks=scenario_shocks or list(DEFAULT_SCENARIO_SHOCKS),
+        include_briefing=include_briefing,
+        briefing_top=briefing_top,
     )
 
     now = time.time()
@@ -419,6 +462,15 @@ def get_or_run_analysis(
         train=train,
         console=None,
         deepseek_options=deepseek_options,
+        risk_profile=risk_profile,
+        risk_limits={
+            "max_drawdown": risk_max_drawdown,
+            "target_volatility": risk_target_volatility,
+        },
+        scenario_shocks=scenario_shocks or list(DEFAULT_SCENARIO_SHOCKS),
+        include_briefing=include_briefing,
+        briefing_top=briefing_top,
+        portfolio_path=portfolio_path,
     )
 
     if not train:
@@ -427,6 +479,7 @@ def get_or_run_analysis(
             "reports": results["reports"],
             "latest": results["latest"],
             "backtests": results.get("backtests", {}),
+            "insights": results.get("insights", {}),
         }
         _ANALYSIS_CACHE[cache_key] = {"results": cached_results, "timestamp": now}
         _ANALYSIS_CACHE.move_to_end(cache_key, last=True)
@@ -479,6 +532,9 @@ def transform_results(
         },
         "tickers": [],
     }
+    insights = results.get("insights", {})
+    if insights:
+        data["insights"] = insights
 
     backtests = results.get("backtests", {})
 
@@ -882,6 +938,13 @@ async def analyze(request: AnalyzeRequest) -> Dict[str, Any]:
             model_name=request.model_name,
             model_type=request.model_type,
             train=request.train,
+            risk_profile=request.risk_profile,
+            risk_max_drawdown=request.risk_max_drawdown,
+            risk_target_volatility=request.risk_target_volatility,
+            scenario_shocks=request.scenario_shocks,
+            include_briefing=request.include_briefing,
+            briefing_top=request.briefing_top,
+            portfolio_path=request.portfolio_path,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -910,6 +973,13 @@ async def portfolio(train: Optional[bool] = False, frequency: Optional[str] = No
             model_name=options.get("model_name", "default_model"),
             model_type=options.get("model_type", "auto"),
             train=bool(train),
+            risk_profile=options.get("risk_profile", "balanced"),
+            risk_max_drawdown=options.get("risk_max_drawdown"),
+            risk_target_volatility=options.get("risk_target_volatility"),
+            scenario_shocks=options.get("scenario_shocks"),
+            include_briefing=options.get("include_briefing", True),
+            briefing_top=options.get("briefing_top", DEFAULT_BRIEFING_TOP),
+            portfolio_path=str(PORTFOLIO_PATH),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -946,9 +1016,14 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
     realtime_timestamp = datetime.now(tz=timezone.utc).isoformat()
     summary = build_analysis_summary(results, realtime_cache)
 
-    history_payload = [item.dict() for item in request.history if item.content]
-    messages = build_chat_messages(summary=summary, question=request.question, history=history_payload)
     bot_name = _select_bot(request.bot_name)
+    history_payload = [item.dict() for item in request.history if item.content]
+    messages = build_chat_messages(
+        summary=summary,
+        question=request.question,
+        history=history_payload,
+        bot_name=bot_name,
+    )
 
     try:
         answer = await asyncio.to_thread(collect_response_text, messages, bot_name, POE_API_KEY)
