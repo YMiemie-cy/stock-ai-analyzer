@@ -81,6 +81,7 @@
                 <option value="prob_gap_desc">Prob Gap 由高到低</option>
                 <option value="prob_buy_desc">买入概率由高到低</option>
                 <option value="prob_sell_desc">卖出概率由高到低</option>
+                <option value="quality_desc">信号质量由高到低</option>
                 <option value="hit_ratio_desc">回测命中率由高到低</option>
                 <option value="alpha_asc">按代码字母排序</option>
               </select>
@@ -91,6 +92,45 @@
             <span id="search-updated" class="hint"></span>
           </div>
         </div>
+        <section id="search-insights" class="insights hidden">
+          <div class="insight-card" id="briefing-card">
+            <div class="insight-card__header">
+              <h3>开盘智能摘要</h3>
+              <span id="briefing-generated" class="insight-caption"></span>
+            </div>
+            <p id="briefing-headline" class="insight-headline">暂无摘要</p>
+            <div id="briefing-top" class="insight-list"></div>
+            <div id="briefing-watchlist" class="insight-watchlist"></div>
+          </div>
+          <div class="insight-card" id="alerts-card">
+            <div class="insight-card__header">
+              <h3>事件提醒</h3>
+              <span class="insight-caption">自动监控大幅波动与阈值风险</span>
+            </div>
+            <ul id="event-alerts" class="insight-ul"></ul>
+          </div>
+          <div class="insight-card" id="market-card">
+            <div class="insight-card__header">
+              <h3>市场布控</h3>
+              <span class="insight-caption">按市场统计信号热度与风险指标</span>
+            </div>
+            <div id="market-summary" class="insight-list"></div>
+          </div>
+          <div class="insight-card" id="scenario-card">
+            <div class="insight-card__header">
+              <h3>压力测试</h3>
+              <span class="insight-caption">快速预估不同冲击下的信号稳定性</span>
+            </div>
+            <ul id="scenario-overview" class="insight-ul"></ul>
+          </div>
+          <div class="insight-card" id="prompts-card">
+            <div class="insight-card__header">
+              <h3>快捷提问建议</h3>
+              <span class="insight-caption">一键抛出高频问题</span>
+            </div>
+            <ul id="prompt-suggestions" class="insight-ul"></ul>
+          </div>
+        </section>
         <div id="search-results"></div>
         <div id="chat-panel" class="chat-panel hidden">
           <div class="chat-panel__header">
@@ -133,6 +173,15 @@
         <div class="actions">
           <button id="refresh-portfolio">立即刷新</button>
           <span id="portfolio-status" class="status"></span>
+        </div>
+        <div id="portfolio-health" class="insight-card hidden">
+          <div class="insight-card__header">
+            <h3>持仓健康面板</h3>
+            <span id="portfolio-health-caption" class="insight-caption"></span>
+          </div>
+          <div id="portfolio-health-summary" class="insight-headline"></div>
+          <div id="portfolio-health-body" class="insight-list"></div>
+          <div id="portfolio-health-missing" class="insight-caption"></div>
         </div>
         <div class="result-controls hidden" id="portfolio-controls">
           <div class="control-group">

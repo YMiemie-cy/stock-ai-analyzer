@@ -223,6 +223,155 @@ button[type="submit"]:hover,
   gap: 0.75rem;
 }
 
+.insights {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.5rem;
+  margin: 1.5rem 0;
+}
+
+.insight-card {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 16px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  box-shadow: 0 14px 38px rgba(15, 23, 42, 0.4);
+}
+
+.insight-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.insight-card h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.insight-caption {
+  color: rgba(148, 163, 184, 0.9);
+  font-size: 0.85rem;
+}
+
+.insight-headline {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.insight-list,
+.insight-watchlist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.insight-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) auto auto minmax(0, 1.5fr);
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.9rem;
+}
+
+.insight-row span:first-child {
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.insight-row .insight-badge {
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: rgba(59, 130, 246, 0.18);
+  color: #bfdbfe;
+}
+
+.insight-badge.buy {
+  background: rgba(34, 197, 94, 0.18);
+  color: #bbf7d0;
+}
+
+.insight-badge.sell {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fecaca;
+}
+
+.insight-badge.yellow {
+  background: rgba(250, 204, 21, 0.18);
+  color: #fef08a;
+}
+
+.insight-badge.red {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fecaca;
+}
+
+.insight-ul {
+  margin: 0;
+  padding-left: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.insight-ul li {
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.insight-ul li.warning {
+  color: #facc15;
+}
+
+.insight-ul li.critical {
+  color: #f87171;
+}
+
+.insight-ul li.info {
+  color: #38bdf8;
+}
+
+.insight-ul .insight-empty {
+  color: rgba(148, 163, 184, 0.9);
+}
+
+.insight-watchlist .insight-warning {
+  font-size: 0.86rem;
+  color: #fbbf24;
+}
+
+.insight-watchlist .insight-warning strong {
+  letter-spacing: 0.01em;
+}
+
+@media (max-width: 960px) {
+  .insights {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  }
+  .insight-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "main badge"
+      "confidence hint";
+  }
+  .insight-row span:nth-child(2) {
+    justify-self: end;
+  }
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

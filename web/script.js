@@ -32,6 +32,20 @@ const portfolioFrequencySelect = document.getElementById("portfolio-frequency-se
 const portfolioSortSelect = document.getElementById("portfolio-sort-select");
 const portfolioFilterSelect = document.getElementById("portfolio-filter-select");
 const portfolioControls = document.getElementById("portfolio-controls");
+const searchInsightsContainer = document.getElementById("search-insights");
+const briefingGeneratedEl = document.getElementById("briefing-generated");
+const briefingHeadlineEl = document.getElementById("briefing-headline");
+const briefingTopEl = document.getElementById("briefing-top");
+const briefingWatchlistEl = document.getElementById("briefing-watchlist");
+const eventAlertsList = document.getElementById("event-alerts");
+const scenarioOverviewList = document.getElementById("scenario-overview");
+const promptSuggestionsList = document.getElementById("prompt-suggestions");
+const marketSummaryEl = document.getElementById("market-summary");
+const portfolioHealthCard = document.getElementById("portfolio-health");
+const portfolioHealthCaption = document.getElementById("portfolio-health-caption");
+const portfolioHealthSummary = document.getElementById("portfolio-health-summary");
+const portfolioHealthBody = document.getElementById("portfolio-health-body");
+const portfolioHealthMissing = document.getElementById("portfolio-health-missing");
 
 let latestSearchResults = [];
 let latestSearchMeta = null;
@@ -43,6 +57,10 @@ let latestSearchResultsByFrequency = {};
 let latestSearchMetaByFrequency = {};
 let latestPortfolioResultsByFrequency = {};
 let latestPortfolioMetaByFrequency = {};
+let latestSearchInsightsByFrequency = {};
+let latestSearchInsights = {};
+let latestPortfolioInsightsByFrequency = {};
+let latestPortfolioInsights = {};
 let currentSearchFrequency = "weekly";
 let currentPortfolioFrequency = "weekly";
 let lastSearchBasePayload = null;
@@ -208,6 +226,288 @@ function setLoadingState(element, isLoading) {
   }
 }
 
+function formatConfidence(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "--";
+  }
+  return `${Math.round(value * 100)}%`;
+}
+
+function truncateLabel(text, max = 16) {
+  if (typeof text !== "string") {
+    return "";
+  }
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+function updateQuickPromptButtons(prompts, buttons) {
+  const suggestions = ensureArray(prompts);
+  buttons.forEach((btn, index) => {
+    if (!btn) {
+      return;
+    }
+    const suggestion = suggestions[index];
+    const defaultLabel = btn.dataset.defaultLabel || btn.textContent.trim();
+    if (suggestion) {
+      btn.dataset.prompt = suggestion;
+      btn.textContent = truncateLabel(suggestion, 18);
+      btn.disabled = false;
+    } else {
+      btn.dataset.prompt = defaultLabel;
+      btn.textContent = defaultLabel;
+      btn.disabled = false;
+    }
+  });
+}
+
+function renderSearchInsights(insights) {
+  if (!searchInsightsContainer) {
+    return;
+  }
+  if (!insights || typeof insights !== "object" || !Object.keys(insights).length) {
+    searchInsightsContainer.classList.add("hidden");
+    if (briefingHeadlineEl) {
+      briefingHeadlineEl.textContent = "暂无摘要";
+    }
+    if (briefingTopEl) {
+      briefingTopEl.innerHTML = "";
+    }
+    if (briefingWatchlistEl) {
+      briefingWatchlistEl.innerHTML = "";
+    }
+    if (eventAlertsList) {
+      eventAlertsList.innerHTML = '<li class="insight-empty">暂无事件提醒</li>';
+    }
+    if (scenarioOverviewList) {
+      scenarioOverviewList.innerHTML = '<li class="insight-empty">暂无压力测试数据</li>';
+    }
+    if (promptSuggestionsList) {
+      promptSuggestionsList.innerHTML = '<li class="insight-empty">暂无建议</li>';
+    }
+    if (marketSummaryEl) {
+      marketSummaryEl.innerHTML = '<div class="insight-caption insight-empty">暂无市场统计</div>';
+    }
+    return;
+  }
+
+  searchInsightsContainer.classList.remove("hidden");
+  const briefing = insights.daily_briefing ?? {};
+  if (briefingGeneratedEl) {
+    briefingGeneratedEl.textContent = briefing.generated_at ? `UTC ${formatDateTime(briefing.generated_at)}` : "";
+  }
+  if (briefingHeadlineEl) {
+    briefingHeadlineEl.textContent = briefing.headline || "暂无摘要";
+  }
+
+  const topSignals = ensureArray(briefing.top_signals).slice(0, 5);
+  if (briefingTopEl) {
+    if (!topSignals.length) {
+      briefingTopEl.innerHTML = '<div class="insight-caption insight-empty">暂无重点标的</div>';
+    } else {
+      briefingTopEl.innerHTML = topSignals
+        .map((entry) => {
+          const decision = String(entry?.decision ?? "").toLowerCase();
+          const badgeClass = `insight-badge ${decision}`;
+          const confidence = formatConfidence(entry?.confidence);
+          const action = escapeHtml(entry?.action_hint ?? "");
+          const ticker = escapeHtml(entry?.ticker ?? "--");
+          return `
+            <div class="insight-row">
+              <span>${ticker}</span>
+              <span class="${badgeClass}">${decision.toUpperCase()}</span>
+              <span>${confidence}</span>
+              <span>${action || ""}</span>
+            </div>
+          `;
+        })
+        .join("");
+    }
+  }
+
+  if (briefingWatchlistEl) {
+    const watchlist = ensureArray(briefing.watchlist).slice(0, 6);
+    if (!watchlist.length) {
+      briefingWatchlistEl.innerHTML = '<div class="insight-caption insight-empty">暂无即时风险</div>';
+    } else {
+      briefingWatchlistEl.innerHTML = watchlist
+        .map((item) => {
+          const ticker = escapeHtml(item?.ticker ?? "");
+          const issues = ensureArray(item?.issues)
+            .map((issue) => escapeHtml(issue))
+            .join("；");
+          return `<div class="insight-warning"><strong>${ticker}</strong>：${issues}</div>`;
+        })
+        .join("");
+    }
+  }
+
+  const alerts = ensureArray(insights.event_alerts).slice(0, 6);
+  if (eventAlertsList) {
+    if (!alerts.length) {
+      eventAlertsList.innerHTML = '<li class="insight-empty">暂无事件提醒</li>';
+    } else {
+      eventAlertsList.innerHTML = alerts
+        .map((alert) => {
+          const severity = alert?.severity ?? "info";
+          const ticker = escapeHtml(alert?.ticker ?? "");
+          const message = escapeHtml(alert?.message ?? "");
+          return `<li class="${severity}"><strong>${ticker}</strong> ${message}</li>`;
+        })
+        .join("");
+    }
+  }
+
+  const scenarios = ensureArray(insights.scenario_matrix?.scenarios).slice(0, 5);
+  const expectedReturns = ensureArray(insights.scenario_matrix?.portfolio_expected_returns);
+  let bestScenario = null;
+  if (expectedReturns.length) {
+    bestScenario = expectedReturns.reduce((prev, cur) =>
+      (prev?.expected_alignment ?? -1) > (cur?.expected_alignment ?? -1) ? prev : cur
+    );
+  }
+  if (scenarioOverviewList) {
+    if (!scenarios.length) {
+      scenarioOverviewList.innerHTML = '<li class="insight-empty">暂无压力测试数据</li>';
+    } else {
+      scenarioOverviewList.innerHTML = scenarios
+        .map((scenario) => {
+          const shock = formatPercent(scenario?.shock ?? 0, 0);
+          const summary = scenario?.summary ?? {};
+          const alignment = summary.expected_alignment ?? 0;
+          const alignmentLabel = `${alignment >= 0 ? "+" : ""}${(alignment * 100).toFixed(1)}%`;
+          return `<li>${shock} ｜ 买入承压 ${summary.buy_under_pressure ?? 0} ｜ 卖出回补 ${
+            summary.sell_recovery ?? 0
+          } ｜ 观望波动 ${summary.neutral_breakout ?? 0} ｜ 对齐收益 ${alignmentLabel}</li>`;
+        })
+        .join("");
+      if (bestScenario) {
+        const headline = `最佳情景：冲击 ${formatPercent(bestScenario.shock ?? 0, 0)} ≈ ${
+          ((bestScenario.expected_alignment ?? 0) * 100).toFixed(1)
+        }% 对齐收益`;
+        scenarioOverviewList.insertAdjacentHTML(
+          "afterbegin",
+          `<li class="info"><strong>${headline}</strong></li>`
+        );
+      }
+    }
+  }
+
+  const prompts = ensureArray(insights.suggested_prompts).slice(0, 6);
+  if (promptSuggestionsList) {
+    if (!prompts.length) {
+      promptSuggestionsList.innerHTML = '<li class="insight-empty">暂无建议</li>';
+    } else {
+      promptSuggestionsList.innerHTML = prompts
+        .map((prompt) => `<li>${escapeHtml(prompt)}</li>`)
+        .join("");
+    }
+  }
+
+  if (marketSummaryEl) {
+    const markets = ensureArray(insights.market_summary?.items);
+    if (!markets.length) {
+      marketSummaryEl.innerHTML = '<div class="insight-caption insight-empty">暂无市场统计</div>';
+    } else {
+      marketSummaryEl.innerHTML = markets
+        .map((item) => {
+          const confidence = typeof item.avg_confidence === "number" ? `${(item.avg_confidence * 100).toFixed(1)}%` : "--";
+          const riskDetail = `LC ${item.low_confidence}｜NT ${item.near_threshold}｜Flip ${item.recent_flip}｜LQ ${item.low_quality ?? 0}`;
+          return `
+            <div class="insight-row">
+              <span>${escapeHtml(item.market || "未知")}</span>
+              <span>${item.buy}/${item.hold}/${item.sell}</span>
+              <span>${confidence}</span>
+              <span>${riskDetail}</span>
+            </div>
+          `;
+        })
+        .join("");
+    }
+  }
+}
+
+function renderPortfolioInsights(insights) {
+  if (!portfolioHealthCard) {
+    return;
+  }
+  const health = insights?.portfolio_health;
+  if (!health || (!ensureArray(health.holdings).length && !ensureArray(health.missing).length)) {
+    portfolioHealthCard.classList.add("hidden");
+    if (portfolioHealthSummary) {
+      portfolioHealthSummary.textContent = "";
+    }
+    if (portfolioHealthBody) {
+      portfolioHealthBody.innerHTML = "";
+    }
+    if (portfolioHealthMissing) {
+      portfolioHealthMissing.textContent = "";
+    }
+    if (portfolioHealthCaption) {
+      portfolioHealthCaption.textContent = "";
+    }
+    return;
+  }
+
+  portfolioHealthCard.classList.remove("hidden");
+  const summary = health.summary ?? {};
+  if (portfolioHealthSummary) {
+    portfolioHealthSummary.textContent = `绿 ${summary.green ?? 0} ｜ 黄 ${summary.yellow ?? 0} ｜ 红 ${summary.red ?? 0}`;
+  }
+  if (portfolioHealthBody) {
+    const holdings = ensureArray(health.holdings)
+      .map((item) => ({
+        ...item,
+        rating: String(item?.rating ?? "green").toLowerCase(),
+      }))
+      .sort((a, b) => {
+        const order = { red: 2, yellow: 1, green: 0 };
+        const diff = (order[b.rating] ?? 0) - (order[a.rating] ?? 0);
+        if (diff !== 0) {
+          return diff;
+        }
+        return (b.confidence ?? 0) - (a.confidence ?? 0);
+      })
+      .slice(0, 6);
+    portfolioHealthBody.innerHTML = holdings
+      .map((item) => {
+        const ticker = escapeHtml(item.ticker ?? "--");
+        const badgeClass = `insight-badge ${item.rating}`;
+        const ratingLabel = item.rating?.toUpperCase() ?? "--";
+        const confidence = formatConfidence(item.confidence);
+        const notes = ensureArray(item.notes)
+          .map((note) => escapeHtml(note))
+          .join("；") || "--";
+        return `
+          <div class="insight-row">
+            <span>${ticker}</span>
+            <span class="${badgeClass}">${ratingLabel}</span>
+            <span>${confidence}</span>
+            <span>${notes}</span>
+          </div>
+        `;
+      })
+      .join("");
+  }
+  if (portfolioHealthMissing) {
+    const missing = ensureArray(health.missing);
+    portfolioHealthMissing.textContent = missing.length ? `未覆盖：${missing.join(", ")}` : "";
+  }
+  if (portfolioHealthCaption) {
+    const meta = insights?.meta ?? {};
+    const riskProfile = meta.risk_profile ? `风险档位：${meta.risk_profile}` : "";
+    const limits = meta.risk_limits ?? {};
+    const limitChunks = [];
+    if (typeof limits.max_drawdown === "number") {
+      limitChunks.push(`最大回撤 ${formatPercent(limits.max_drawdown, 0)}`);
+    }
+    if (typeof limits.target_volatility === "number") {
+      limitChunks.push(`目标波动 ${formatPercent(limits.target_volatility, 0)}`);
+    }
+    const suffix = limitChunks.length ? `（${limitChunks.join(" ｜ ")}）` : "";
+    portfolioHealthCaption.textContent = `${riskProfile}${suffix}`.trim();
+  }
+}
+
 function buildRiskBadges(latest) {
   const flags = ensureArray(latest?.risk_flags);
   const badges = [];
@@ -226,6 +526,11 @@ function buildRiskBadges(latest) {
     const recency = signalAge === 0 ? "当日刚翻转" : signalAge ? `${signalAge} 日前翻转` : "近期信号翻转";
     badges.push(`<span class="risk-badge risk-badge--flip" title="${recency}">刚刚反转</span>`);
   }
+  const qualityProb = typeof latest?.meta_signal_prob === "number" ? latest.meta_signal_prob : null;
+  if (flags.includes("low_quality") || (qualityProb !== null && qualityProb < 0.35)) {
+    const qualityText = qualityProb !== null ? `质量评分 ${Math.round(qualityProb * 100)}%` : "质量评分偏低";
+    badges.push(`<span class="risk-badge risk-badge--low" title="${qualityText}">质量偏低</span>`);
+  }
   return badges.join("");
 }
 
@@ -235,9 +540,11 @@ function computeConfidenceScore(row) {
   }
   const probGap = Number(row?.prob_gap ?? 0);
   const indicatorBias = Number(row?.indicator_bias ?? 0);
+  const qualityProb = Number(row?.meta_signal_prob ?? 0);
   const probStrength = Math.max(probGap, 0);
   const indicatorStrength = Math.min(Math.max(Math.abs(indicatorBias) / 2, 0), 1);
-  return Number((probStrength * 0.7 + indicatorStrength * 0.3).toFixed(2));
+  const qualityStrength = Math.min(Math.max(qualityProb, 0), 1);
+  return Number((probStrength * 0.55 + indicatorStrength * 0.25 + qualityStrength * 0.2).toFixed(2));
 }
 
 function getConfidenceFromRow(row) {
@@ -260,6 +567,8 @@ function renderTable(tickerData, limit = 5) {
   const probSell = typeof latest.prob_sell === "number" ? latest.prob_sell : null;
   const probGap = typeof latest.prob_gap === "number" ? latest.prob_gap : null;
   const probDiff = typeof latest.prob_diff_buy_sell === "number" ? latest.prob_diff_buy_sell : null;
+  const qualityProb = typeof latest.meta_signal_prob === "number" ? latest.meta_signal_prob : null;
+  const qualityConfidence = typeof latest.meta_signal_confidence === "number" ? latest.meta_signal_confidence : null;
   const decisionLabel = decision.toUpperCase();
   const latestDate = latest.timestamp?.split("T")[0] ?? "--";
   const realtimeTimestamp = formatDateTime(latest.realtime_price_timestamp);
@@ -350,6 +659,7 @@ function renderTable(tickerData, limit = 5) {
           <span>卖出 <strong>${formatPercent(probSell, 0)}</strong></span>
           <span>概率差 <strong>${formatDecimal(probGap, 2)}</strong></span>
           <span>买卖差 <strong>${formatDecimal(probDiff, 2)}</strong></span>
+          <span>质量 <strong>${formatPercent(qualityProb, 0)}</strong></span>
         </div>
       </div>
       <div class="result-card__insights">
@@ -366,6 +676,8 @@ function renderTable(tickerData, limit = 5) {
           ${metricsRow("波动 (10 日)", formatPercent(Math.abs(latest.volatility_10d ?? NaN), 1))}
           ${metricsRow("趋势强度 (20 日)", formatDecimal(latest.trend_strength_20d, 2))}
           ${metricsRow("趋势强度 (60 日)", formatDecimal(latest.trend_strength_60d, 2))}
+          ${metricsRow("信号质量", formatPercent(qualityProb, 0))}
+          ${metricsRow("质量置信度", qualityConfidence !== null ? qualityConfidence.toFixed(2) : "--")}
         </div>
       </div>
       <div class="result-card__signal">
@@ -426,6 +738,7 @@ function enrichResultItem(item, index = 0) {
     _probGap: typeof latest.prob_gap === "number" ? latest.prob_gap : 0,
     _probBuy: typeof latest.prob_buy === "number" ? latest.prob_buy : 0,
     _probSell: typeof latest.prob_sell === "number" ? latest.prob_sell : 0,
+    _quality: typeof latest.meta_signal_prob === "number" ? latest.meta_signal_prob : 0,
     _hitRatio: item.backtest?.hit_ratio ?? 0,
     _order: index,
   };
@@ -458,6 +771,8 @@ function sortResultItems(items, sortValue) {
       return cloned.sort((a, b) => b._probBuy - a._probBuy);
     case "prob_sell_desc":
       return cloned.sort((a, b) => b._probSell - a._probSell);
+    case "quality_desc":
+      return cloned.sort((a, b) => (b._quality ?? 0) - (a._quality ?? 0));
     case "hit_ratio_desc":
       return cloned.sort((a, b) => (b._hitRatio ?? 0) - (a._hitRatio ?? 0));
     case "alpha_asc":
@@ -473,6 +788,7 @@ function computeGroupMetric(group, sortValue) {
     probGap: item._probGap,
     probBuy: item._probBuy,
     probSell: item._probSell,
+    quality: item._quality ?? 0,
     hitRatio: item._hitRatio ?? 0,
   }));
   switch (sortValue) {
@@ -484,6 +800,8 @@ function computeGroupMetric(group, sortValue) {
       return Math.max(...metrics.map((m) => m.probBuy));
     case "prob_sell_desc":
       return Math.max(...metrics.map((m) => m.probSell));
+    case "quality_desc":
+      return Math.max(...metrics.map((m) => m.quality));
     case "hit_ratio_desc":
       return Math.max(...metrics.map((m) => m.hitRatio));
     case "alpha_asc":
@@ -502,6 +820,7 @@ function sortResultGroups(groups, sortValue) {
     case "prob_gap_desc":
     case "prob_buy_desc":
     case "prob_sell_desc":
+    case "quality_desc":
     case "hit_ratio_desc":
       return cloned.sort((a, b) => computeGroupMetric(b, sortValue) - computeGroupMetric(a, sortValue));
     default:
@@ -540,10 +859,11 @@ function renderPortfolioChatMessages() {
   const content = portfolioChatHistory
     .map((msg) => {
       const roleLabel = msg.role === "assistant" ? "AI" : "我";
+      const safeContent = escapeHtml(msg.content).replace(/\n/g, "<br>");
       return `
         <div class="chat-message ${msg.role}">
           <div class="chat-message__avatar">${roleLabel}</div>
-          <div class="chat-message__bubble">${escapeHtml(msg.content)}</div>
+          <div class="chat-message__bubble">${safeContent}</div>
         </div>
       `;
     })
@@ -780,10 +1100,11 @@ function renderChatMessages() {
   const content = chatHistory
     .map((msg) => {
       const roleLabel = msg.role === "assistant" ? "AI" : "我";
+      const safeContent = escapeHtml(msg.content).replace(/\n/g, "<br>");
       return `
         <div class="chat-message ${msg.role}">
           <div class="chat-message__avatar">${roleLabel}</div>
-          <div class="chat-message__bubble">${escapeHtml(msg.content)}</div>
+          <div class="chat-message__bubble">${safeContent}</div>
         </div>
       `;
     })
@@ -884,6 +1205,7 @@ async function executeSearchAnalysis(basePayload, frequencyMode, { silent = fals
 
   latestSearchResultsByFrequency = {};
   latestSearchMetaByFrequency = {};
+  latestSearchInsightsByFrequency = {};
 
   const summaries = [];
 
@@ -894,6 +1216,7 @@ async function executeSearchAnalysis(basePayload, frequencyMode, { silent = fals
       const freq = normalizedFrequencies[idx];
       latestSearchResultsByFrequency[freq] = annotateTickers(data.tickers, freq);
       latestSearchMetaByFrequency[freq] = data.meta ?? {};
+      latestSearchInsightsByFrequency[freq] = data.insights ?? {};
       summaries.push({ frequency: freq, meta: data.meta ?? {} });
     });
 
@@ -906,6 +1229,8 @@ async function executeSearchAnalysis(basePayload, frequencyMode, { silent = fals
       searchStatus.className = "status error";
       latestSearchPayload = null;
       setLoadingState(searchResultsContainer, false);
+      renderSearchInsights(null);
+      updateQuickPromptButtons([], quickPromptButtons);
       if (chatPanel) {
         chatPanel.classList.add("hidden");
         chatHistory = [];
@@ -932,6 +1257,13 @@ async function executeSearchAnalysis(basePayload, frequencyMode, { silent = fals
     searchStatus.textContent = buildSearchStatusText(summaries, preferredMeta);
     searchStatus.className = "status success";
 
+    latestSearchInsights =
+      latestSearchInsightsByFrequency[chatFrequency] ??
+      latestSearchInsightsByFrequency[normalizedFrequencies[0]] ??
+      responses[0]?.insights ?? {};
+    renderSearchInsights(latestSearchInsights);
+    updateQuickPromptButtons(latestSearchInsights?.suggested_prompts, quickPromptButtons);
+
     if (chatPanel) {
       chatPanel.classList.remove("hidden");
       chatStatus.textContent = "已根据最新数据准备好，可以向 AI 咨询策略或风险。";
@@ -950,6 +1282,8 @@ async function executeSearchAnalysis(basePayload, frequencyMode, { silent = fals
     latestSearchMetaByFrequency = {};
     latestSearchResults = [];
     renderSearchResults();
+    renderSearchInsights(null);
+    updateQuickPromptButtons([], quickPromptButtons);
     if (resultControls) {
       resultControls.classList.add("hidden");
     }
@@ -987,6 +1321,7 @@ function updatePortfolioChatContext(frequencies) {
   latestPortfolioMeta = latestPortfolioMetaByFrequency[preferred] ?? null;
   const chatSource = latestPortfolioResultsByFrequency[preferred] ?? [];
   latestPortfolioPayload = buildChatPayloadFromMeta(latestPortfolioMeta ?? {}, chatSource, normalized);
+  return { preferred, normalized };
 }
 
 function buildPortfolioStatusText(summaries) {
@@ -1179,6 +1514,7 @@ async function loadPortfolio({ train = false } = {}) {
 
   latestPortfolioResultsByFrequency = {};
   latestPortfolioMetaByFrequency = {};
+  latestPortfolioInsightsByFrequency = {};
 
   const summaries = [];
 
@@ -1189,10 +1525,11 @@ async function loadPortfolio({ train = false } = {}) {
       const freq = normalizedFrequencies[idx];
       latestPortfolioResultsByFrequency[freq] = annotateTickers(data.tickers, freq);
       latestPortfolioMetaByFrequency[freq] = data.meta ?? {};
+      latestPortfolioInsightsByFrequency[freq] = data.insights ?? {};
       summaries.push({ frequency: freq, meta: data.meta ?? {} });
     });
 
-    updatePortfolioChatContext(normalizedFrequencies);
+    const { preferred: preferredFrequency } = updatePortfolioChatContext(normalizedFrequencies);
     updatePortfolioDisplay();
 
     if (!latestPortfolioResults.length) {
@@ -1203,6 +1540,8 @@ async function loadPortfolio({ train = false } = {}) {
       latestPortfolioMeta = latestPortfolioMetaByFrequency[normalizedFrequencies[0]] ?? null;
       latestPortfolioPayload = null;
       setLoadingState(portfolioResultsContainer, false);
+      renderPortfolioInsights(null);
+      updateQuickPromptButtons([], portfolioQuickPromptButtons);
       if (portfolioChatPanel) {
         portfolioChatPanel.classList.add("hidden");
         portfolioChatHistory = [];
@@ -1222,6 +1561,13 @@ async function loadPortfolio({ train = false } = {}) {
       portfolioStatus.textContent = buildPortfolioStatusText(summaries);
       portfolioStatus.className = "status success";
     }
+
+    latestPortfolioInsights =
+      latestPortfolioInsightsByFrequency[preferredFrequency] ??
+      latestPortfolioInsightsByFrequency[normalizedFrequencies[0]] ??
+      responses[0]?.insights ?? {};
+    renderPortfolioInsights(latestPortfolioInsights);
+    updateQuickPromptButtons(latestPortfolioInsights?.suggested_prompts, portfolioQuickPromptButtons);
 
     if (portfolioChatPanel) {
       if (latestPortfolioResults.length) {
@@ -1253,6 +1599,8 @@ async function loadPortfolio({ train = false } = {}) {
     latestPortfolioMeta = null;
     latestPortfolioPayload = null;
     renderPortfolioResults();
+    renderPortfolioInsights(null);
+    updateQuickPromptButtons([], portfolioQuickPromptButtons);
     if (portfolioChatPanel) {
       portfolioChatPanel.classList.add("hidden");
       portfolioChatHistory = [];
@@ -1296,6 +1644,24 @@ if (frequencySelect) {
     await executeSearchAnalysis({ ...lastSearchBasePayload }, frequencyMode);
   });
 }
+
+quickPromptButtons.forEach((btn) => {
+  if (btn) {
+    btn.dataset.defaultLabel = btn.textContent.trim();
+    if (!btn.dataset.prompt) {
+      btn.dataset.prompt = btn.textContent.trim();
+    }
+  }
+});
+
+portfolioQuickPromptButtons.forEach((btn) => {
+  if (btn) {
+    btn.dataset.defaultLabel = btn.textContent.trim();
+    if (!btn.dataset.prompt) {
+      btn.dataset.prompt = btn.textContent.trim();
+    }
+  }
+});
 
 quickPromptButtons.forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -1509,6 +1875,9 @@ if (portfolioChatForm) {
         const freq = normalizeFrequency(analysis.meta?.resample_frequency ?? currentPortfolioFrequency);
         latestPortfolioResultsByFrequency[freq] = annotateTickers(analysis.tickers, freq);
         latestPortfolioMetaByFrequency[freq] = analysis.meta ?? {};
+        if (analysis.insights) {
+          latestPortfolioInsightsByFrequency[freq] = analysis.insights;
+        }
         const summaries = [{ frequency: freq, meta: analysis.meta ?? {} }];
         currentPortfolioFrequency = currentPortfolioFrequency === "combined" ? currentPortfolioFrequency : freq;
         updatePortfolioChatContext([freq]);
@@ -1523,6 +1892,9 @@ if (portfolioChatForm) {
           portfolioStatus.textContent = buildPortfolioStatusText(summaries);
           portfolioStatus.className = "status success";
         }
+        latestPortfolioInsights = latestPortfolioInsightsByFrequency[freq] ?? latestPortfolioInsights;
+        renderPortfolioInsights(latestPortfolioInsights);
+        updateQuickPromptButtons(latestPortfolioInsights?.suggested_prompts, portfolioQuickPromptButtons);
       }
     } catch (error) {
       console.error(error);
@@ -1544,6 +1916,8 @@ if (portfolioChatForm) {
 
 // 默认展示即时信号
 switchView("search");
+renderSearchInsights(null);
+renderPortfolioInsights(null);
 renderSearchResults();
 renderPortfolioResults();
 loadPortfolio();

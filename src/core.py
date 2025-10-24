@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import math
 import os
 from collections import OrderedDict
@@ -24,6 +25,16 @@ from .model import (
 from .signals import generate_signal_report
 from .backtest import naive_signal_backtest
 from .tickers import normalize_tickers, market_for_ticker
+from .insights import (
+    ensure_scenario_shocks,
+    build_daily_briefing,
+    detect_event_alerts,
+    build_scenario_matrix,
+    build_portfolio_health,
+    build_suggested_prompts,
+    build_market_summary,
+    build_performance_snapshot,
+)
 
 
 _MODEL_CACHE: Dict[tuple[str, str, str], ModelArtifacts] = {}
@@ -140,6 +151,12 @@ def run_analysis(
     train: bool = False,
     console: Optional[Console] = None,
     deepseek_options: Optional[Dict[str, Any]] = None,
+    risk_profile: str = "balanced",
+    risk_limits: Optional[Dict[str, Optional[float]]] = None,
+    scenario_shocks: Optional[Iterable[float]] = None,
+    include_briefing: bool = True,
+    briefing_top: int = 5,
+    portfolio_path: Optional[str] = None,
 ) -> Dict[str, object]:
     """Execute the full analysis pipeline and return structured results."""
     freq_code = "D" if resample_frequency.lower() == "daily" else "W"
@@ -215,6 +232,26 @@ def run_analysis(
 
             deepseek_enabled = bool(deepseek_client and deepseek_config and apply_deepseek_fusion)
 
+    def _clean_limit(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        return numeric if math.isfinite(numeric) else None
+
+    risk_limits_dict = risk_limits or {}
+    risk_limits_clean = {
+        "max_drawdown": _clean_limit(risk_limits_dict.get("max_drawdown")),
+        "target_volatility": _clean_limit(risk_limits_dict.get("target_volatility")),
+    }
+    scenario_shock_values = ensure_scenario_shocks(scenario_shocks)
+    try:
+        briefing_top = int(briefing_top)
+    except (TypeError, ValueError):
+        briefing_top = 5
+    briefing_top = max(1, min(briefing_top, 15))
     normalized_tickers, ticker_mapping, invalid_inputs = normalize_tickers(tickers)
     if not normalized_tickers:
         raise ValueError("未能识别任何有效的股票代码，请输入正确的股票代码。")
@@ -323,12 +360,14 @@ def run_analysis(
     latest_map: "OrderedDict[str, Dict[str, object]]" = OrderedDict()
     backtest_map: "OrderedDict[str, Dict[str, object]]" = OrderedDict()
 
-    def _compute_confidence(prob_gap: Optional[Number], indicator_bias: Optional[Number]) -> float:
+    def _compute_confidence(prob_gap: Optional[Number], indicator_bias: Optional[Number], quality_prob: Optional[Number] = None) -> float:
         gap_val = float(prob_gap) if isinstance(prob_gap, Number) and math.isfinite(prob_gap) else 0.0
         bias_val = float(indicator_bias) if isinstance(indicator_bias, Number) and math.isfinite(indicator_bias) else 0.0
+        quality_val = float(quality_prob) if isinstance(quality_prob, Number) and math.isfinite(quality_prob) else 0.0
         prob_strength = max(gap_val, 0.0)
         indicator_strength = min(max(abs(bias_val) / 2.0, 0.0), 1.0)
-        return round(prob_strength * 0.7 + indicator_strength * 0.3, 4)
+        quality_strength = min(max(quality_val, 0.0), 1.0)
+        return round(prob_strength * 0.55 + indicator_strength * 0.25 + quality_strength * 0.2, 4)
 
     def _build_driver_summary(row: pd.Series) -> List[str]:
         drivers: List[str] = []
@@ -431,7 +470,11 @@ def run_analysis(
                         )
                 latest_row["key_drivers"] = _build_driver_summary(source_row)
 
-            confidence_score = _compute_confidence(latest_series.get("prob_gap"), latest_series.get("indicator_bias"))
+            confidence_score = _compute_confidence(
+                latest_series.get("prob_gap"),
+                latest_series.get("indicator_bias"),
+                latest_series.get("meta_signal_prob"),
+            )
             latest_row["confidence_score"] = confidence_score
 
             prob_gap_value = latest_row.get("prob_gap")
@@ -447,6 +490,9 @@ def run_analysis(
                 isinstance(prob_gap_value, Number) and math.isfinite(prob_gap_value) and prob_gap_value < 0.04
             ):
                 risk_flags.append("low_confidence")
+            quality_prob = latest_row.get("meta_signal_prob")
+            if isinstance(quality_prob, Number) and math.isfinite(quality_prob) and quality_prob < 0.35:
+                risk_flags.append("low_quality")
             if latest_row.get("signal_is_recent"):
                 risk_flags.append("recent_flip")
             if is_near_threshold:
@@ -494,6 +540,38 @@ def run_analysis(
                 "trades": bt.trades,
             }
 
+    portfolio_holdings: List[str] = []
+    portfolio_source: Optional[str] = None
+    portfolio_source_error: Optional[str] = None
+    if portfolio_path:
+        candidate = Path(str(portfolio_path)).expanduser()
+        if candidate.exists():
+            portfolio_source = str(candidate)
+            try:
+                with candidate.open("r", encoding="utf-8") as fh:
+                    portfolio_config = json.load(fh)
+            except Exception as exc:  # pragma: no cover - rare path
+                portfolio_source_error = f"读取持仓文件失败：{exc}"
+            else:
+                holdings = portfolio_config.get("tickers") or portfolio_config.get("holdings") or []
+                if isinstance(holdings, list):
+                    portfolio_holdings = [str(item).upper() for item in holdings if item]
+        else:
+            portfolio_source_error = f"未找到指定的持仓文件：{candidate}"
+    else:
+        default_portfolio = Path(__file__).resolve().parent.parent / "portfolio.json"
+        if default_portfolio.exists():
+            try:
+                with default_portfolio.open("r", encoding="utf-8") as fh:
+                    default_config = json.load(fh)
+            except Exception as exc:  # pragma: no cover - rare path
+                portfolio_source_error = f"读取默认持仓文件失败：{exc}"
+            else:
+                holdings = default_config.get("tickers") or default_config.get("holdings") or []
+                if isinstance(holdings, list):
+                    portfolio_holdings = [str(item).upper() for item in holdings if item]
+                    portfolio_source = str(default_portfolio)
+
     meta = {
         "tickers": list(tickers),
         "normalized_tickers": normalized_tickers,
@@ -520,6 +598,13 @@ def run_analysis(
         "market_by_ticker": {
             ticker_mapping.get(t, t): market_lookup.get(t, "global") for t in normalized_tickers
         },
+        "risk_profile": risk_profile,
+        "risk_limits": risk_limits_clean,
+        "scenario_shocks": scenario_shock_values,
+        "briefing_top": briefing_top,
+        "include_briefing": include_briefing,
+        "portfolio_source": portfolio_source,
+        "portfolio_source_error": portfolio_source_error,
     }
     meta["deepseek"] = {
         "enabled": deepseek_enabled,
@@ -529,6 +614,41 @@ def run_analysis(
         "error": deepseek_error,
     }
 
+    insights: Dict[str, Any] = {}
+    meta_for_briefing = dict(meta)
+    if include_briefing:
+        insights["daily_briefing"] = build_daily_briefing(
+            latest_map,
+            report_map,
+            meta=meta_for_briefing,
+            top_n=briefing_top,
+            risk_limits=risk_limits_clean,
+        )
+    insights["event_alerts"] = detect_event_alerts(latest_map, risk_limits=risk_limits_clean)
+    scenario_matrix = build_scenario_matrix(latest_map, scenario_shock_values)
+    insights["scenario_matrix"] = scenario_matrix
+    insights["portfolio_health"] = build_portfolio_health(
+        latest_map,
+        portfolio_holdings,
+        risk_limits=risk_limits_clean,
+    )
+    insights["market_summary"] = build_market_summary(latest_map, meta_for_briefing)
+    insights["performance_snapshot"] = build_performance_snapshot(latest_map, scenario_matrix)
+    insights["suggested_prompts"] = build_suggested_prompts(
+        latest_map,
+        top_n=max(3, briefing_top),
+    )
+    insights["meta"] = {
+        "scenario_shocks": scenario_shock_values,
+        "risk_profile": risk_profile,
+        "risk_limits": risk_limits_clean,
+        "briefing_top": briefing_top,
+        "include_briefing": include_briefing,
+        "portfolio_source": portfolio_source,
+        "portfolio_source_error": portfolio_source_error,
+        "portfolio_holdings_count": len(portfolio_holdings),
+    }
+
     return {
         "meta": meta,
         "reports": report_map,
@@ -536,4 +656,5 @@ def run_analysis(
         "backtests": backtest_map,
         "dataset": dataset,
         "predictions": predictions,
+        "insights": insights,
     }
