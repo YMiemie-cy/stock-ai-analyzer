@@ -93,6 +93,40 @@ MACRO_SERIES = {
     "us10y": "^TNX",
 }
 
+REGION_MACRO_SERIES: Dict[str, Dict[str, str]] = {
+    "SS": {
+        "csi300": "000300.SS",
+        "shanghai": "000001.SS",
+        "cnh": "CNH=X",
+    },
+    "SZ": {
+        "csi300": "000300.SS",
+        "shanghai": "000001.SS",
+        "cnh": "CNH=X",
+    },
+    "BJ": {
+        "csi300": "000300.SS",
+        "shanghai": "000001.SS",
+        "cnh": "CNH=X",
+    },
+    "HK": {
+        "hang_seng": "^HSI",
+        "cnh": "CNH=X",
+    },
+    "US": {
+        "nasdaq": "^IXIC",
+        "russell": "^RUT",
+    },
+    "default": {
+        "sp500": "^GSPC",
+    },
+}
+
+REGION_FEATURE_KEYS: Dict[str, set[str]] = {}
+for region, mapping in REGION_MACRO_SERIES.items():
+    for key in mapping.keys():
+        REGION_FEATURE_KEYS.setdefault(region, set()).add(key)
+
 
 def _ticker_region(ticker: str) -> str:
     if "." in ticker:
@@ -504,6 +538,30 @@ def build_feature_frame(price_data: PriceData, horizon: int = 5) -> pd.DataFrame
         ratio_ema = aligned / ema_30 - 1.0
         df[f"macro_{macro_key}_ema_ratio_30"] = ratio_ema.replace([np.inf, -np.inf], np.nan)
 
+    region_key = _ticker_region(price_data.ticker)
+    region_macros = REGION_MACRO_SERIES.get(region_key) or REGION_MACRO_SERIES.get("default", {})
+    for macro_key, symbol in region_macros.items():
+        series = _load_macro_series(symbol, macro_start, macro_end)
+        base = f"macro_region_{macro_key}"
+        if series is None or series.empty:
+            df[f"{base}_level"] = np.nan
+            df[f"{base}_pct_change_5d"] = np.nan
+            df[f"{base}_zscore_60d"] = np.nan
+            df[f"{base}_ema_ratio_30"] = np.nan
+            continue
+        aligned = series.reindex(df.index).ffill().bfill()
+        df[f"{base}_level"] = aligned
+        pct_change_5d = aligned.pct_change(5, fill_method=None)
+        pct_change_5d = pct_change_5d.replace([np.inf, -np.inf], np.nan)
+        df[f"{base}_pct_change_5d"] = pct_change_5d
+        rolling_mean = aligned.rolling(60, min_periods=20).mean()
+        rolling_std = aligned.rolling(60, min_periods=20).std()
+        zscore = (aligned - rolling_mean) / rolling_std
+        df[f"{base}_zscore_60d"] = zscore.replace([np.inf, -np.inf], np.nan)
+        ema_30 = aligned.ewm(span=30, adjust=False, min_periods=10).mean()
+        ratio_ema = aligned / ema_30 - 1.0
+        df[f"{base}_ema_ratio_30"] = ratio_ema.replace([np.inf, -np.inf], np.nan)
+
     df["macro_liquidity_spread"] = (
         df.get("macro_us10y_pct_change_5d", 0.0) - df.get("macro_vix_pct_change_5d", 0.0)
     )
@@ -600,8 +658,23 @@ def build_feature_frame(price_data: PriceData, horizon: int = 5) -> pd.DataFrame
                 f"macro_{macro_key}_ema_ratio_30",
             ]
         )
+    region_macro_keys = set()
+    for mapping in REGION_MACRO_SERIES.values():
+        region_macro_keys.update(mapping.keys())
+    for macro_key in sorted(region_macro_keys):
+        zero_fill_cols.extend(
+            [
+                f"macro_region_{macro_key}_level",
+                f"macro_region_{macro_key}_pct_change_5d",
+                f"macro_region_{macro_key}_zscore_60d",
+                f"macro_region_{macro_key}_ema_ratio_30",
+            ]
+        )
     for col in zero_fill_cols:
-        df[col] = df[col].fillna(0.0)
+        if col in df.columns:
+            df[col] = df[col].fillna(0.0)
+        else:
+            df[col] = 0.0
 
     feature_cols = [col for col in df.columns if col != f"return_{horizon}d"]
     df[feature_cols] = df[feature_cols].fillna(0.0)
