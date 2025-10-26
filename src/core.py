@@ -274,62 +274,77 @@ def run_analysis(
     model_name_by_market: Dict[str, str] = {}
     model_type_by_market: Dict[str, str] = {}
 
+
+    def _sector_key(ticker: str) -> str:
+        meta = _load_sector_metadata(ticker)
+        sector = meta.get("sector") or meta.get("industry") or "unknown"
+        return str(sector).lower()
+
     for market, market_tickers in market_groups.items():
         actual_model_name = _model_name_for_market(model_name, market)
         model_name_by_market[market] = actual_model_name
 
-        data_overrides = MARKET_DATA_OVERRIDES.get(market, {})
-        threshold_market = float(data_overrides.get("threshold", threshold))
-        min_threshold_market = float(data_overrides.get("min_threshold", min_threshold))
-        max_threshold_market = float(data_overrides.get("max_threshold", max_threshold))
+        sector_groups: "OrderedDict[str, List[str]]" = OrderedDict()
+        for ticker in market_tickers:
+            sector = _sector_key(ticker) if market == "china_a" else "global"
+            sector_groups.setdefault(sector, []).append(ticker)
 
-        dataset_market = build_dataset(
-            market_tickers,
-            lookback_years=lookback_years,
-            horizon=horizon,
-            threshold=threshold_market,
-            adaptive_threshold=adaptive_threshold,
-            resample_frequency=freq_code,
-            min_threshold=min_threshold_market,
-            max_threshold=max_threshold_market,
-        )
-        if dataset_market.empty:
-            continue
+        for sector_key, sector_tickers in sector_groups.items():
+            group_label = f"{market}:{sector_key}"
+            data_overrides = MARKET_DATA_OVERRIDES.get(market, {})
+            threshold_market = float(data_overrides.get("threshold", threshold))
+            min_threshold_market = float(data_overrides.get("min_threshold", min_threshold))
+            max_threshold_market = float(data_overrides.get("max_threshold", max_threshold))
 
-        hold_target_ratio = float(data_overrides.get("hold_target_ratio", 0.0))
-        train_dataset = _rebalance_hold_samples(
-            dataset_market,
-            target_ratio=hold_target_ratio,
-            random_state=42,
-        )
-
-        datasets.append(dataset_market)
-        available_norm.update(dataset_market["ticker"].unique())
-
-        artifacts = ensure_model(
-            model_name=actual_model_name,
-            dataset=train_dataset,
-            train=train,
-            console=console,
-            market=market,
-            model_type=model_type,
-        )
-        predictions = predict_signals(dataset_market, artifacts)
-        if deepseek_enabled and apply_deepseek_fusion and deepseek_client and deepseek_config:
-            ds_meta_context = {
-                "horizon": horizon,
-                "resample_frequency": resample_frequency,
-                "threshold": threshold_market,
-                "market": market,
-            }
-            predictions = apply_deepseek_fusion(
-                predictions,
-                client=deepseek_client,
-                config=deepseek_config,
-                meta=ds_meta_context,
+            dataset_market = build_dataset(
+                sector_tickers,
+                lookback_years=lookback_years,
+                horizon=horizon,
+                threshold=threshold_market,
+                adaptive_threshold=adaptive_threshold,
+                resample_frequency=freq_code,
+                min_threshold=min_threshold_market,
+                max_threshold=max_threshold_market,
             )
-        predictions_list.append(predictions)
-        model_type_by_market[market] = getattr(artifacts, "model_type", model_type)
+            if dataset_market.empty:
+                continue
+
+            hold_target_ratio = float(data_overrides.get("hold_target_ratio", 0.0))
+            train_dataset = _rebalance_hold_samples(
+                dataset_market,
+                target_ratio=hold_target_ratio,
+                random_state=42,
+            )
+
+            datasets.append(dataset_market)
+            available_norm.update(dataset_market["ticker"].unique())
+
+            model_label = f\"{actual_model_name}_{sector_key}\" if sector_key != \"global\" else actual_model_name
+            artifacts = ensure_model(
+                model_name=model_label,
+                dataset=train_dataset,
+                train=train,
+                console=console,
+                market=market,
+                model_type=model_type,
+            )
+            predictions = predict_signals(dataset_market, artifacts)
+            if deepseek_enabled and apply_deepseek_fusion and deepseek_client and deepseek_config:
+                ds_meta_context = {
+                    "horizon": horizon,
+                    "resample_frequency": resample_frequency,
+                    "threshold": threshold_market,
+                    "market": market,
+                    "sector": sector_key,
+                }
+                predictions = apply_deepseek_fusion(
+                    predictions,
+                    client=deepseek_client,
+                    config=deepseek_config,
+                    meta=ds_meta_context,
+                )
+            predictions_list.append(predictions)
+            model_type_by_market[group_label] = getattr(artifacts, "model_type", model_type)
 
     if not datasets:
         missing_all = [ticker_mapping.get(t, t) for t in normalized_tickers] + invalid_inputs
