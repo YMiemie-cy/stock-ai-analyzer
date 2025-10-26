@@ -172,6 +172,12 @@ FEATURE_COLUMNS = [
     "regime_risk_on",
     "regime_score",
     "trend_alignment_score",
+    "fundamental_pe_ratio",
+    "fundamental_forward_pe",
+    "fundamental_price_to_book",
+    "fundamental_beta",
+    "fundamental_dividend_yield",
+    "fundamental_market_cap_log",
     "range_pct",
     "gap_pct",
     "volume_trend_60d",
@@ -864,6 +870,9 @@ def train_model(
                 "macro_region_nasdaq_zscore_60d",
                 "macro_region_russell_zscore_60d",
                 "macro_region_sp500_zscore_60d",
+                "fundamental_pe_ratio",
+                "fundamental_price_to_book",
+                "fundamental_beta",
             ]
                 for column in candidate_cols:
                     if column in dataset_sorted.columns:

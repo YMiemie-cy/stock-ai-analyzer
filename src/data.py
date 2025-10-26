@@ -86,6 +86,7 @@ BENCHMARK_MAP = {
 
 _BENCHMARK_CACHE: Dict[str, pd.Series] = {}
 _MACRO_CACHE: Dict[str, pd.Series] = {}
+_SECURITY_META_CACHE: Dict[str, Dict[str, object]] = {}
 
 MACRO_SERIES = {
     "vix": "^VIX",
@@ -153,6 +154,31 @@ def _ticker_region(ticker: str) -> str:
 def _benchmark_symbol_for(ticker: str) -> Optional[str]:
     region = _ticker_region(ticker)
     return BENCHMARK_MAP.get(region)
+
+
+def _load_security_metadata(ticker: str) -> Dict[str, object]:
+    cached = _SECURITY_META_CACHE.get(ticker)
+    if cached is not None:
+        return cached
+    try:
+        info = yf.Ticker(ticker)
+        fast_info = getattr(info, "fast_info", {}) or {}
+        basic_info = getattr(info, "info", {}) or {}
+    except Exception:
+        fast_info = {}
+        basic_info = {}
+    meta = {
+        "sector": basic_info.get("sector") or basic_info.get("industry") or "unknown",
+        "industry": basic_info.get("industry") or "unknown",
+        "market_cap": fast_info.get("market_cap") or basic_info.get("marketCap"),
+        "pe_ratio": fast_info.get("pe_ratio") or basic_info.get("trailingPE"),
+        "forward_pe_ratio": basic_info.get("forwardPE"),
+        "price_to_book": basic_info.get("priceToBook"),
+        "beta": fast_info.get("beta") or basic_info.get("beta"),
+        "dividend_yield": basic_info.get("dividendYield") or fast_info.get("dividend_yield"),
+    }
+    _SECURITY_META_CACHE[ticker] = meta
+    return meta
 
 
 def _load_benchmark_series(symbol: str, start: pd.Timestamp, end: pd.Timestamp) -> Optional[pd.Series]:
@@ -586,6 +612,28 @@ def build_feature_frame(price_data: PriceData, horizon: int = 5) -> pd.DataFrame
     )
     df["trend_alignment_score"] = np.sign(df["return_20d"].fillna(0.0)) * np.sign(trend_strength)
 
+    meta_snapshot = _load_security_metadata(price_data.ticker)
+
+    def _meta_value(key: str) -> float | None:
+        value = meta_snapshot.get(key)
+        if value in (None, ""):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    df["fundamental_pe_ratio"] = _meta_value("pe_ratio")
+    df["fundamental_forward_pe"] = _meta_value("forward_pe_ratio")
+    df["fundamental_price_to_book"] = _meta_value("price_to_book")
+    df["fundamental_beta"] = _meta_value("beta")
+    df["fundamental_dividend_yield"] = _meta_value("dividend_yield")
+    market_cap = _meta_value("market_cap")
+    if market_cap and market_cap > 0:
+        df["fundamental_market_cap_log"] = float(np.log(market_cap))
+    else:
+        df["fundamental_market_cap_log"] = np.nan
+
     fill_zero_cols = [
         "bench_return_5d",
         "bench_return_20d",
@@ -649,6 +697,12 @@ def build_feature_frame(price_data: PriceData, horizon: int = 5) -> pd.DataFrame
         "regime_risk_on",
         "regime_score",
         "trend_alignment_score",
+        "fundamental_pe_ratio",
+        "fundamental_forward_pe",
+        "fundamental_price_to_book",
+        "fundamental_beta",
+        "fundamental_dividend_yield",
+        "fundamental_market_cap_log",
     ]
     for macro_key in MACRO_SERIES:
         zero_fill_cols.extend(
