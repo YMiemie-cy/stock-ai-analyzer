@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 import math
 import re
+import random
+import time
 from dataclasses import dataclass
+from hashlib import sha1
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import httpx
@@ -63,6 +66,12 @@ class DeepseekConfig:
     weight: float = 0.35
     latest_only: bool = True
     max_rows: int = 60
+    cache_ttl: float = 900.0
+    max_retries: int = 2
+    retry_backoff: float = 1.5
+    apply_only_when_low_confidence: bool = True
+    trigger_prob_gap: float = 0.08
+    trigger_quality: float = 0.45
 
 
 @dataclass
@@ -95,6 +104,14 @@ class DeepseekClient:
         else:
             self._client = http_client
             self._owns_client = False
+        self._cache: Dict[str, Tuple[float, DeepseekDecision]] = {}
+        self.stats: Dict[str, float] = {
+            "requests": 0,
+            "cached": 0,
+            "failures": 0,
+            "retries": 0,
+            "tokens": 0.0,
+        }
 
     def close(self) -> None:
         """Close the internal HTTP client if we created it."""
@@ -110,21 +127,38 @@ class DeepseekClient:
         *,
         meta: Optional[Mapping[str, Any]] = None,
     ) -> DeepseekDecision | None:
+        cache_key = self._cache_key(row)
+        cached = self._get_cached(cache_key)
+        if cached is not None:
+            self.stats["cached"] += 1
+            return cached
+
         payload = self._build_payload(row, meta=meta)
-        try:
-            response = self._client.post(self._endpoint, json=payload)
-        except Exception:
-            return None
-        if response.status_code >= 500:
+        attempts = max(1, int(self.config.max_retries) + 1)
+        response = None
+        for attempt in range(attempts):
+            try:
+                response = self._client.post(self._endpoint, json=payload)
+            except Exception:
+                response = None
+            if response is not None and response.status_code < 500:
+                break
+            if attempt + 1 < attempts:
+                self.stats["retries"] += 1
+                backoff = self.config.retry_backoff ** attempt if self.config.retry_backoff > 1 else 1.0
+                time.sleep(min(5.0, backoff) + random.uniform(0, 0.1))
+        if response is None:
+            self.stats["failures"] += 1
             return None
         if response.status_code == 401:
-            # Invalid credential, bail out permanently for this run.
             raise PermissionError("DeepSeek API returned 401 - invalid API key.")
         if response.status_code >= 400:
+            self.stats["failures"] += 1
             return None
         try:
             data = response.json()
         except ValueError:
+            self.stats["failures"] += 1
             return None
         choices: Sequence[Dict[str, Any]] = data.get("choices") or []
         first = choices[0] if choices else {}
@@ -139,7 +173,14 @@ class DeepseekClient:
         reason = str(parsed.get("reason", "")).strip()
         if not label:
             return None
-        return DeepseekDecision(label=label, confidence=confidence, reason=reason, raw=parsed)
+        decision = DeepseekDecision(label=label, confidence=confidence, reason=reason, raw=parsed)
+        self._remember_cache(cache_key, decision)
+        self.stats["requests"] += 1
+        usage = data.get("usage") or {}
+        total_tokens = usage.get("total_tokens") or usage.get("totalTokens")
+        if isinstance(total_tokens, (int, float)):
+            self.stats["tokens"] += float(total_tokens)
+        return decision
 
     def _build_payload(
         self,
@@ -227,6 +268,36 @@ class DeepseekClient:
         }
         return payload
 
+    def _cache_key(self, row: Mapping[str, Any]) -> str:
+        payload = {
+            "ticker": row.get("ticker"),
+            "timestamp": str(row.get("timestamp") or row.get("date") or ""),
+            "price": row.get("price"),
+            "prob_buy": row.get("prob_buy"),
+            "prob_hold": row.get("prob_hold"),
+            "prob_sell": row.get("prob_sell"),
+            "analysis_frequency": row.get("analysis_frequency"),
+        }
+        return sha1(json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")).hexdigest()
+
+    def _get_cached(self, key: str) -> DeepseekDecision | None:
+        if not key or self.config.cache_ttl <= 0:
+            return None
+        entry = self._cache.get(key)
+        if not entry:
+            return None
+        expires_at, decision = entry
+        if expires_at < time.time():
+            self._cache.pop(key, None)
+            return None
+        return decision
+
+    def _remember_cache(self, key: str, decision: DeepseekDecision) -> None:
+        if not key or self.config.cache_ttl <= 0:
+            return
+        expires_at = time.time() + max(0.0, self.config.cache_ttl)
+        self._cache[key] = (expires_at, decision)
+
 
 def _label_to_distribution(label: str, confidence: float) -> Dict[str, float]:
     label = (label or "").lower()
@@ -267,6 +338,11 @@ def apply_deepseek_fusion(
 
     applied_any = False
     for idx, row in row_iter:
+        if config.apply_only_when_low_confidence:
+            prob_gap_value = _safe_float(row.get("prob_gap"), default=1.0)
+            quality_value = _safe_float(row.get("meta_signal_prob"), default=1.0)
+            if prob_gap_value >= config.trigger_prob_gap and quality_value >= config.trigger_quality:
+                continue
         decision = client.classify_row(row.to_dict(), meta=meta)
         if decision is None:
             continue

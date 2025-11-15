@@ -9,3 +9,10 @@ data_cache/
 *.sqlite
 *.db
 *.log
+# 模型文件(可通过训练脚本重新生成)
+models/*.joblib
+# 报告文件(运行时生成)
+reports/*.md
+reports/*.jsonl
+reports/*.json
+reports/*.csv

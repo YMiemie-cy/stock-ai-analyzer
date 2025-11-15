@@ -8,8 +8,9 @@
 - 使用经典技术指标结合动量、波动率、ATR、自适应阈值、成交量异常与基准相对强弱等辅助特征构建数据集，支持日/周频分析。
 - 新增宏观因子（VIX、美元指数、十年期美债收益率等）作为市场环境特征，提升跨市场泛化能力。
 - 增补趋势强度、均线斜率、价格 Z-Score、布林带偏移、短周期收益等派生特征，兼顾趋势行情与震荡行情的信号稳定性。
+- 引入行业 ETF（XLK/XLF/XLE 等）与 200 日均线宽度、Keltner 通道等强化特征，同时自动清洗异常 K 线与 0 成交量行，保证数据一致性。
 - 训练轻量级机器学习分类模型，以预测短周期收益表现。
-- 支持自动模型选择，在 HistGradientBoosting 与 RandomForest 等候选模型中基于验证集指标择优。
+- 支持自动模型选择，在 HistGradientBoosting、RandomForest、LightGBM 等候选模型中基于滚动时间序列交叉验证择优。
 - 自动模式在多模型性能接近时引入加权集成，提高 A 股与美股场景下的可信度与准确率。
 - 将模型输出与基于规则的技术指标评分融合，生成直观的买入 / 持有 / 卖出信号。
 - 输出简明报告，总结信心水平、支撑指标以及近期表现。
@@ -50,6 +51,7 @@
 - `--resample-frequency weekly`：以周为单位聚合 OHLCV，更贴合长期加减仓节奏；`--horizon 12` 即预测约 12 周后的收益。
 - `--threshold` / `--min-threshold` / `--max-threshold`：控制买卖阈值区间，适配不同持仓目标。
 - `--summary-report`：额外生成 Markdown 总览（默认命名为 `reports/summary_时间戳.md`），可打印成简洁报告。
+- `--model-type`：支持 `auto`、`hist_gb`、`random_forest`、`lightgbm`，其中 `auto` 会基于滚动时间序列交叉验证选择表现最佳的模型。
 - 支持 A 股 6 位代码（如 `600519`、`000001`）和美股/港股等带交易所后缀的代码；若输入公司名称请改用对应的交易所代码，也可在 `ticker_aliases.json` 中维护中文/英文别名。
 
 4. 后续运行会复用已训练模型和缓存数据，除非再次传入 `--train`。
@@ -107,6 +109,11 @@ python -m src.cli \
 
 DeepSeek 会输出结构化的 `label/confidence/reason`，系统会根据设定权重与本地模型概率进行再平衡，
 帮助过滤低置信度信号或放大边缘机会。
+
+## 自动维护
+
+- `python scripts/maintenance.py`：一键执行 `data_cache/` 清理与 `scripts/train_all.py` 批量训练，并把结果写入 `reports/maintenance_summary.json` 与 `maintenance_log.jsonl`。可通过 `--dry-run` 预览动作，或用 `--skip-train/--skip-cache` 做部分任务。
+- 部署到 Render 时，可利用 `render.yaml` 中的 `refresh-assets` cron job（默认 UTC 02:00）定期触发该脚本，确保模型与缓存自动刷新；若需要自定义频率，可在 Render 仪表盘覆盖 `schedule`。
 
 ## 进阶分析
 

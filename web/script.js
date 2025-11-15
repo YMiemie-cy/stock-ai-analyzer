@@ -46,6 +46,15 @@ const portfolioHealthCaption = document.getElementById("portfolio-health-caption
 const portfolioHealthSummary = document.getElementById("portfolio-health-summary");
 const portfolioHealthBody = document.getElementById("portfolio-health-body");
 const portfolioHealthMissing = document.getElementById("portfolio-health-missing");
+const overviewPanel = document.getElementById("overview-panel");
+const overviewTitleEl = document.getElementById("overview-title");
+const overviewUpdatedEl = document.getElementById("overview-updated");
+const metricBuyEl = document.getElementById("metric-buy");
+const metricHoldEl = document.getElementById("metric-hold");
+const metricSellEl = document.getElementById("metric-sell");
+const priorityAlertsCard = document.getElementById("priority-alerts");
+const priorityAlertsList = document.getElementById("priority-alerts-list");
+const alertsToggleBtn = document.getElementById("alerts-toggle");
 
 let latestSearchResults = [];
 let latestSearchMeta = null;
@@ -94,6 +103,89 @@ function frequencyLabel(freq) {
   return FREQUENCY_LABELS[key] || key;
 }
 
+function daysBetween(dateString, todayString) {
+  if (!dateString) {
+    return null;
+  }
+  const target = new Date(dateString);
+  const reference = todayString ? new Date(todayString) : new Date();
+  if (Number.isNaN(target.getTime()) || Number.isNaN(reference.getTime())) {
+    return null;
+  }
+  const ms =
+    reference.setHours(0, 0, 0, 0) -
+    target.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.round(ms / 86_400_000));
+}
+
+function formatDataRecencyLabel(days) {
+  if (typeof days !== "number" || Number.isNaN(days)) {
+    return "";
+  }
+  if (days === 0) {
+    return "（今日数据）";
+  }
+  if (days === 1) {
+    return "（昨日数据）";
+  }
+  return `（距今 ${days} 天）`;
+}
+
+function describeDataRange(meta) {
+  const start = meta?.data_start ?? "--";
+  const end = meta?.data_end ?? "--";
+  const recency = formatDataRecencyLabel(daysBetween(meta?.data_end, meta?.today));
+  return `${start} ~ ${end}${recency ? ` ${recency}` : ""}`;
+}
+
+function updateOverviewPanel(meta, insights) {
+  if (!overviewPanel) {
+    return;
+  }
+  const snapshot = insights?.performance_snapshot;
+  if (!snapshot || !meta) {
+    overviewPanel.classList.add("hidden");
+    return;
+  }
+  overviewPanel.classList.remove("hidden");
+  const decisions = snapshot.decisions || {};
+  const total = snapshot.total ?? meta?.normalized_tickers?.length ?? 0;
+  if (overviewTitleEl) {
+    overviewTitleEl.textContent = `本轮分析：${total || "--"} 支标的`;
+  }
+  const updated = meta?.data_end || meta?.today;
+  const recency = formatDataRecencyLabel(daysBetween(updated, meta?.today));
+  if (overviewUpdatedEl) {
+    overviewUpdatedEl.textContent = updated ? `${updated}${recency ? ` ${recency}` : ""}` : "--";
+  }
+  if (metricBuyEl) metricBuyEl.textContent = (decisions.buy ?? 0).toString();
+  if (metricHoldEl) metricHoldEl.textContent = (decisions.hold ?? 0).toString();
+  if (metricSellEl) metricSellEl.textContent = (decisions.sell ?? 0).toString();
+  updatePriorityAlerts(insights?.event_alerts || []);
+}
+
+function updatePriorityAlerts(alerts) {
+  if (!priorityAlertsCard || !priorityAlertsList) {
+    return;
+  }
+  const items = ensureArray(alerts);
+  if (!items.length) {
+    priorityAlertsCard.classList.add("hidden");
+    return;
+  }
+  priorityAlertsCard.classList.remove("hidden");
+  const displayItems = priorityAlertsExpanded ? items : items.slice(0, 3);
+  priorityAlertsList.innerHTML = displayItems
+    .map(
+      (item) =>
+        `<li><span>${escapeHtml(item?.ticker ?? "--")}</span>${escapeHtml(item?.message ?? "")}</li>`
+    )
+    .join("");
+  if (alertsToggleBtn) {
+    alertsToggleBtn.textContent = priorityAlertsExpanded ? "收起" : "查看全部";
+  }
+}
+
 if (searchResultsContainer) {
   searchResultsContainer.innerHTML = "<div class=\"empty-state\">请输入股票代码，以获取即时买卖参考。</div>";
 }
@@ -101,11 +193,11 @@ if (searchResultsContainer) {
 let lookupTimer = null;
 let lookupAbortController = null;
 let lastLookupQuery = "";
-let portfolioTimer = null;
 let chatHistory = [];
 let chatSending = false;
 let portfolioChatHistory = [];
 let portfolioChatSending = false;
+let priorityAlertsExpanded = false;
 
 function switchView(target) {
   views.forEach((view) => view.classList.toggle("active", view.id === `${target}-view`));
@@ -117,12 +209,8 @@ navButtons.forEach((button) => {
     switchView(button.dataset.view);
     if (button.dataset.view === "portfolio") {
       loadPortfolio();
-      setupPortfolioAutoRefresh();
-    } else {
-      clearPortfolioAutoRefresh();
-      if (button.dataset.view === "search") {
-        renderSearchResults();
-      }
+    } else if (button.dataset.view === "search") {
+      renderSearchResults();
     }
   });
 });
@@ -158,18 +246,6 @@ document.addEventListener("click", (event) => {
   }
   hideTickerSuggestions();
 });
-
-function clearPortfolioAutoRefresh() {
-  if (portfolioTimer) {
-    clearInterval(portfolioTimer);
-    portfolioTimer = null;
-  }
-}
-
-function setupPortfolioAutoRefresh(interval = 60_000) {
-  clearPortfolioAutoRefresh();
-  portfolioTimer = setInterval(() => loadPortfolio(), interval);
-}
 
 function formatDecision(decision) {
   const cls = `decision-${decision}`;
@@ -508,9 +584,32 @@ function renderPortfolioInsights(insights) {
   }
 }
 
+function setupCardToggleDelegation(container) {
+  if (!container) {
+    return;
+  }
+  container.addEventListener("click", (event) => {
+    const toggle = event.target.closest(".result-card__toggle");
+    if (!toggle) {
+      return;
+    }
+    const card = toggle.closest(".result-card");
+    if (!card) {
+      return;
+    }
+    const details = card.querySelector(".result-card__details");
+    if (!details) {
+      return;
+    }
+    details.classList.toggle("is-open");
+    toggle.textContent = details.classList.contains("is-open") ? "收起详情" : "查看详情";
+  });
+}
+
 function buildRiskBadges(latest) {
   const flags = ensureArray(latest?.risk_flags);
   const badges = [];
+  const dataAgeDays = typeof latest?.data_age_days === "number" ? latest.data_age_days : null;
   const probGap = typeof latest?.prob_gap === "number" ? latest.prob_gap : null;
   const thresholdDistance = typeof latest?.threshold_distance === "number" ? latest.threshold_distance : null;
   const signalAge = typeof latest?.signal_age_days === "number" ? latest.signal_age_days : null;
@@ -531,7 +630,34 @@ function buildRiskBadges(latest) {
     const qualityText = qualityProb !== null ? `质量评分 ${Math.round(qualityProb * 100)}%` : "质量评分偏低";
     badges.push(`<span class="risk-badge risk-badge--low" title="${qualityText}">质量偏低</span>`);
   }
+  if (dataAgeDays !== null && dataAgeDays >= 5) {
+    const recency = dataAgeDays === 1 ? "距今 1 天" : `距今 ${dataAgeDays} 天`;
+    badges.push(`<span class="risk-badge risk-badge--edge" title="${recency}">数据偏旧</span>`);
+  }
   return badges.join("");
+}
+
+function buildAiInsightSummary(latest) {
+  if (!latest) {
+    return "";
+  }
+  const decision = String(latest.decision ?? "保持观望").toUpperCase();
+  const confidenceText = formatPercent(getConfidenceFromRow(latest), 0);
+  const qualityVal =
+    typeof latest?.meta_signal_prob === "number" ? `${Math.round(latest.meta_signal_prob * 100)}%` : "--";
+  const returnText = formatPercentWithSign(latest?.return_5d);
+  const deepLabel = latest?.deepseek_label ? String(latest.deepseek_label).toUpperCase() : "";
+  const deepConf =
+    typeof latest?.deepseek_confidence === "number" ? `（${formatPercent(latest.deepseek_confidence, 0)}）` : "";
+  const deepReason = latest?.deepseek_reason ? `：${escapeHtml(latest.deepseek_reason)}` : "";
+  let summary = `模型倾向 <strong>${decision}</strong>（信心 ${confidenceText}，质量 ${qualityVal}）`;
+  if (returnText && returnText !== "--") {
+    summary += `，近 5 日表现 ${returnText}`;
+  }
+  if (deepLabel) {
+    summary += `；DeepSeek 倾向 ${deepLabel}${deepConf}${deepReason}`;
+  }
+  return summary;
 }
 
 function computeConfidenceScore(row) {
@@ -571,6 +697,8 @@ function renderTable(tickerData, limit = 5) {
   const qualityConfidence = typeof latest.meta_signal_confidence === "number" ? latest.meta_signal_confidence : null;
   const decisionLabel = decision.toUpperCase();
   const latestDate = latest.timestamp?.split("T")[0] ?? "--";
+  const dataAgeDays = typeof latest.data_age_days === "number" ? latest.data_age_days : null;
+  const dataAgeLabel = formatDataRecencyLabel(dataAgeDays);
   const realtimeTimestamp = formatDateTime(latest.realtime_price_timestamp);
   const realtimePrice =
     typeof latest.realtime_price === "number" && !Number.isNaN(latest.realtime_price)
@@ -605,6 +733,10 @@ function renderTable(tickerData, limit = 5) {
   if (riskFlags.includes("recent_flip")) {
     cardClasses.push("result-card--recent-flip");
   }
+  if (dataAgeDays !== null && dataAgeDays >= 5) {
+    cardClasses.push("result-card--stale");
+  }
+  const aiSummary = buildAiInsightSummary(latest);
   const rows = history.slice(-limit).map((row) => {
     const confidence = computeConfidenceScore(row);
     const return1d = formatPercentWithSign(row.return_1d);
@@ -649,64 +781,82 @@ function renderTable(tickerData, limit = 5) {
         </div>
       </header>
       <p class="result-card__meta">
-        最新日期：${latestDate} ｜ 建议：${decisionLabel} ｜ ${actionHint || "暂无操作建议"}
+        数据截至：${latestDate}${dataAgeLabel ? ` ${dataAgeLabel}` : ""} ｜ 建议：${decisionLabel} ｜ ${actionHint || "暂无操作建议"}
       </p>
-      <div class="result-card__summary">
-        <div class="decision-chip">${decisionLabel}</div>
-        <div class="summary-metrics">
-          <span>信心 <strong>${formatPercent(confidence, 0)}</strong></span>
-          <span>买入 <strong>${formatPercent(probBuy, 0)}</strong></span>
-          <span>卖出 <strong>${formatPercent(probSell, 0)}</strong></span>
-          <span>概率差 <strong>${formatDecimal(probGap, 2)}</strong></span>
-          <span>买卖差 <strong>${formatDecimal(probDiff, 2)}</strong></span>
-          <span>质量 <strong>${formatPercent(qualityProb, 0)}</strong></span>
+      <div class="result-card__quick">
+        <div class="quick-metric">
+          <span class="label">信心</span>
+          <span class="value">${formatPercent(confidence, 0)}</span>
+        </div>
+        <div class="quick-metric">
+          <span class="label">买入概率</span>
+          <span class="value">${formatPercent(probBuy, 0)}</span>
+        </div>
+        <div class="quick-metric">
+          <span class="label">数据</span>
+          <span class="value">${dataAgeLabel || "最新"}</span>
         </div>
       </div>
-      <div class="result-card__insights">
-        <div class="metric-group">
-          <h4>短期收益</h4>
-          ${metricsRow("1 日", formatPercentWithSign(latest.return_1d))}
-          ${metricsRow("3 日", formatPercentWithSign(latest.return_3d))}
-          ${metricsRow("5 日", formatPercentWithSign(latest.return_5d))}
-          ${metricsRow("10 日", formatPercentWithSign(latest.return_10d))}
+      <div class="result-card__details">
+        <div class="result-card__summary">
+          <div class="decision-chip">${decisionLabel}</div>
+          <div class="summary-metrics">
+            <span>信心 <strong>${formatPercent(confidence, 0)}</strong></span>
+            <span>买入 <strong>${formatPercent(probBuy, 0)}</strong></span>
+            <span>卖出 <strong>${formatPercent(probSell, 0)}</strong></span>
+            <span>概率差 <strong>${formatDecimal(probGap, 2)}</strong></span>
+            <span>买卖差 <strong>${formatDecimal(probDiff, 2)}</strong></span>
+            <span>质量 <strong>${formatPercent(qualityProb, 0)}</strong></span>
+          </div>
         </div>
-        <div class="metric-group">
-          <h4>风险指示</h4>
-          ${metricsRow("波动 (5 日)", formatPercent(Math.abs(latest.volatility_5d ?? NaN), 1))}
-          ${metricsRow("波动 (10 日)", formatPercent(Math.abs(latest.volatility_10d ?? NaN), 1))}
-          ${metricsRow("趋势强度 (20 日)", formatDecimal(latest.trend_strength_20d, 2))}
-          ${metricsRow("趋势强度 (60 日)", formatDecimal(latest.trend_strength_60d, 2))}
-          ${metricsRow("信号质量", formatPercent(qualityProb, 0))}
-          ${metricsRow("质量置信度", qualityConfidence !== null ? qualityConfidence.toFixed(2) : "--")}
+        <div class="result-card__insights">
+          <div class="metric-group">
+            <h4>短期收益</h4>
+            ${metricsRow("1 日", formatPercentWithSign(latest.return_1d))}
+            ${metricsRow("3 日", formatPercentWithSign(latest.return_3d))}
+            ${metricsRow("5 日", formatPercentWithSign(latest.return_5d))}
+            ${metricsRow("10 日", formatPercentWithSign(latest.return_10d))}
+          </div>
+          <div class="metric-group">
+            <h4>风险指示</h4>
+            ${metricsRow("波动 (5 日)", formatPercent(Math.abs(latest.volatility_5d ?? NaN), 1))}
+            ${metricsRow("波动 (10 日)", formatPercent(Math.abs(latest.volatility_10d ?? NaN), 1))}
+            ${metricsRow("趋势强度 (20 日)", formatDecimal(latest.trend_strength_20d, 2))}
+            ${metricsRow("趋势强度 (60 日)", formatDecimal(latest.trend_strength_60d, 2))}
+            ${metricsRow("信号质量", formatPercent(qualityProb, 0))}
+            ${metricsRow("质量置信度", qualityConfidence !== null ? qualityConfidence.toFixed(2) : "--")}
+          </div>
         </div>
+        ${aiSummary ? `<div class="ai-insight">${aiSummary}</div>` : ""}
+        <div class="result-card__signal">
+          <div>信号最后更新：<strong>${signalChangedAt}</strong>（${signalAgeLabel}）</div>
+          <div>自信号以来收益：<strong>${returnSinceSignal}</strong></div>
+          <div>实时行情时间：<strong>${realtimeTimestamp}</strong></div>
+        </div>
+        ${driverMarkup}
+        <table>
+          <thead>
+            <tr>
+              <th>日期</th>
+              <th>信号</th>
+              <th>价格</th>
+              <th>分数</th>
+              <th>Prob Buy</th>
+              <th>Prob Sell</th>
+              <th>Prob Gap</th>
+              <th>Confidence</th>
+              <th>1 日</th>
+              <th>5 日</th>
+              <th>10 日</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.join("")}
+          </tbody>
+        </table>
+        ${renderBacktest(tickerData.backtest)}
       </div>
-      <div class="result-card__signal">
-        <div>信号最后更新：<strong>${signalChangedAt}</strong>（${signalAgeLabel}）</div>
-        <div>自信号以来收益：<strong>${returnSinceSignal}</strong></div>
-        <div>实时行情时间：<strong>${realtimeTimestamp}</strong></div>
-      </div>
-      ${driverMarkup}
-      <table>
-        <thead>
-          <tr>
-            <th>日期</th>
-            <th>信号</th>
-            <th>价格</th>
-            <th>分数</th>
-            <th>Prob Buy</th>
-            <th>Prob Sell</th>
-            <th>Prob Gap</th>
-            <th>Confidence</th>
-            <th>1 日</th>
-            <th>5 日</th>
-            <th>10 日</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.join("")}
-        </tbody>
-      </table>
-      ${renderBacktest(tickerData.backtest)}
+      <button type="button" class="result-card__toggle">查看详情</button>
     </article>
   `;
 }
@@ -1170,7 +1320,7 @@ function buildSearchStatusText(summaries, preferredMeta) {
   const segments = summaries.map(({ frequency, meta }) => {
     const missing = ensureArray(meta?.missing_tickers ?? []);
     const invalid = ensureArray(meta?.invalid_inputs ?? []);
-    const base = `${frequencyLabel(frequency)}：${meta?.data_start ?? "--"} ~ ${meta?.data_end ?? "--"}`;
+    const base = `${frequencyLabel(frequency)}：${describeDataRange(meta)}`;
     const extra = [];
     if (missing.length) {
       extra.push(`缺失：${missing.join(", ")}`);
@@ -1230,6 +1380,8 @@ async function executeSearchAnalysis(basePayload, frequencyMode, { silent = fals
       latestSearchPayload = null;
       setLoadingState(searchResultsContainer, false);
       renderSearchInsights(null);
+      updateOverviewPanel(null, null);
+      updatePriorityAlerts([]);
       updateQuickPromptButtons([], quickPromptButtons);
       if (chatPanel) {
         chatPanel.classList.add("hidden");
@@ -1262,6 +1414,7 @@ async function executeSearchAnalysis(basePayload, frequencyMode, { silent = fals
       latestSearchInsightsByFrequency[normalizedFrequencies[0]] ??
       responses[0]?.insights ?? {};
     renderSearchInsights(latestSearchInsights);
+    updateOverviewPanel(preferredMeta, latestSearchInsights);
     updateQuickPromptButtons(latestSearchInsights?.suggested_prompts, quickPromptButtons);
 
     if (chatPanel) {
@@ -1283,6 +1436,7 @@ async function executeSearchAnalysis(basePayload, frequencyMode, { silent = fals
     latestSearchResults = [];
     renderSearchResults();
     renderSearchInsights(null);
+    updateOverviewPanel(null, null);
     updateQuickPromptButtons([], quickPromptButtons);
     if (resultControls) {
       resultControls.classList.add("hidden");
@@ -1331,7 +1485,7 @@ function buildPortfolioStatusText(summaries) {
   const segments = summaries.map(({ frequency, meta }) => {
     const missing = ensureArray(meta?.missing_tickers ?? []);
     const invalid = ensureArray(meta?.invalid_inputs ?? []);
-    const base = `${frequencyLabel(frequency)}：${meta?.data_start ?? "--"} ~ ${meta?.data_end ?? "--"}`;
+    const base = `${frequencyLabel(frequency)}：${describeDataRange(meta)}`;
     const extra = [];
     if (missing.length) {
       extra.push(`缺失：${missing.join(", ")}`);
@@ -1654,6 +1808,13 @@ quickPromptButtons.forEach((btn) => {
   }
 });
 
+if (alertsToggleBtn) {
+  alertsToggleBtn.addEventListener("click", () => {
+    priorityAlertsExpanded = !priorityAlertsExpanded;
+    updatePriorityAlerts(latestSearchInsights?.event_alerts || []);
+  });
+}
+
 portfolioQuickPromptButtons.forEach((btn) => {
   if (btn) {
     btn.dataset.defaultLabel = btn.textContent.trim();
@@ -1701,7 +1862,6 @@ if (portfolioFrequencySelect) {
 
 refreshPortfolioBtn.addEventListener("click", () => {
   loadPortfolio();
-  setupPortfolioAutoRefresh();
 });
 
 if (chatForm) {
@@ -1917,7 +2077,11 @@ if (portfolioChatForm) {
 // 默认展示即时信号
 switchView("search");
 renderSearchInsights(null);
+updateOverviewPanel(null, null);
+updatePriorityAlerts([]);
 renderPortfolioInsights(null);
 renderSearchResults();
 renderPortfolioResults();
+setupCardToggleDelegation(searchResultsContainer);
+setupCardToggleDelegation(portfolioResultsContainer);
 loadPortfolio();

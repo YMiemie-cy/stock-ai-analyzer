@@ -43,9 +43,12 @@ TRAINING_PLANS: List[Dict[str, object]] = [
             "IWM",
             "XLF",
             "XLK",
+            "TSLL",
+            "ROKU",
+            "BB",
         ],
         "params": {
-            "lookback_years": 10,
+            "lookback_years": 12,
             "horizon": 12,
             "threshold": 0.055,
             "min_threshold": 0.02,
@@ -71,7 +74,7 @@ TRAINING_PLANS: List[Dict[str, object]] = [
             "GLD",
         ],
         "params": {
-            "lookback_years": 10,
+            "lookback_years": 12,
             "horizon": 12,
             "threshold": 0.05,
             "min_threshold": 0.018,
@@ -95,9 +98,10 @@ TRAINING_PLANS: List[Dict[str, object]] = [
             "601012.SS",
             "600887.SS",
             "000858.SZ",
+            "600050.SS",
         ],
         "params": {
-            "lookback_years": 8,
+            "lookback_years": 9,
             "horizon": 12,
             "threshold": 0.06,
             "min_threshold": 0.02,
@@ -123,7 +127,7 @@ TRAINING_PLANS: List[Dict[str, object]] = [
             "002230.SZ",
         ],
         "params": {
-            "lookback_years": 8,
+            "lookback_years": 9,
             "horizon": 12,
             "threshold": 0.065,
             "min_threshold": 0.025,

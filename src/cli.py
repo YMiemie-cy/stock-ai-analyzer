@@ -172,7 +172,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-name", default="default_model", help="Saved model name")
     parser.add_argument(
         "--model-type",
-        choices=["auto", "hist_gb", "random_forest"],
+        choices=["auto", "hist_gb", "random_forest", "lightgbm"],
         default="auto",
         help="选择模型架构；auto 会在候选模型之间选出验证表现最佳的方案。",
     )

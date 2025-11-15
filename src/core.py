@@ -14,7 +14,7 @@ from typing import Any, Dict, Iterable, List, Optional
 import pandas as pd
 from rich.console import Console
 
-from .data import build_dataset
+from .data import build_dataset, load_security_metadata
 from .model import (
     ModelArtifacts,
     get_market_bias_factors,
@@ -38,6 +38,20 @@ from .insights import (
 
 
 _MODEL_CACHE: Dict[tuple[str, str, str], ModelArtifacts] = {}
+_SECTOR_META_CACHE: Dict[str, Dict[str, Any]] = {}
+def _load_sector_metadata(ticker: str) -> Dict[str, Any]:
+    cached = _SECTOR_META_CACHE.get(ticker)
+    if cached is not None:
+        return cached
+    try:
+        meta = load_security_metadata(ticker)
+    except Exception:
+        meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    _SECTOR_META_CACHE[ticker] = meta
+    return meta
+
 
 
 MARKET_DATA_OVERRIDES: Dict[str, Dict[str, object]] = {
@@ -54,6 +68,8 @@ MARKET_DATA_OVERRIDES: Dict[str, Dict[str, object]] = {
         "hold_target_ratio": 0.2,
     },
 }
+
+LOW_QUALITY_HOLD_THRESHOLD = 0.32
 
 
 def _rebalance_hold_samples(
@@ -166,6 +182,7 @@ def run_analysis(
     deepseek_client = None
     deepseek_owned_client = False
     deepseek_error: str | None = None
+    deepseek_stats_snapshot: Dict[str, Any] | None = None
     apply_deepseek_fusion = None
 
     if deepseek_options:
@@ -203,6 +220,16 @@ def run_analysis(
                         max_rows = int(max_rows)
                     except (TypeError, ValueError):
                         max_rows = 60
+                    trigger_prob_gap = options.get("trigger_prob_gap", 0.08)
+                    trigger_quality = options.get("trigger_quality", 0.45)
+                    try:
+                        trigger_prob_gap = float(trigger_prob_gap)
+                    except (TypeError, ValueError):
+                        trigger_prob_gap = 0.08
+                    try:
+                        trigger_quality = float(trigger_quality)
+                    except (TypeError, ValueError):
+                        trigger_quality = 0.45
                     deepseek_config = DeepseekConfig(
                         api_key=api_key,
                         model=str(options.get("model") or DEFAULT_DEEPSEEK_MODEL),
@@ -213,6 +240,9 @@ def run_analysis(
                         weight=max(0.0, min(1.0, weight)),
                         latest_only=latest_only,
                         max_rows=max_rows,
+                        apply_only_when_low_confidence=bool(options.get("apply_low_confidence", True)),
+                        trigger_prob_gap=max(0.0, trigger_prob_gap),
+                        trigger_quality=max(0.0, min(1.0, trigger_quality)),
                     )
             client_candidate = options.get("client")
             if deepseek_config:
@@ -268,6 +298,7 @@ def run_analysis(
             return f"{base}_china"
         return base
 
+    today = dt.date.today()
     datasets: List[pd.DataFrame] = []
     predictions_list: List[pd.DataFrame] = []
     available_norm: "set[str]" = set()
@@ -319,7 +350,7 @@ def run_analysis(
             datasets.append(dataset_market)
             available_norm.update(dataset_market["ticker"].unique())
 
-            model_label = f\"{actual_model_name}_{sector_key}\" if sector_key != \"global\" else actual_model_name
+            model_label = f"{actual_model_name}_{sector_key}" if sector_key != "global" else actual_model_name
             artifacts = ensure_model(
                 model_name=model_label,
                 dataset=train_dataset,
@@ -356,6 +387,10 @@ def run_analysis(
     dataset = pd.concat(datasets)
     predictions = pd.concat(predictions_list)
 
+    if deepseek_client:
+        stats_candidate = getattr(deepseek_client, "stats", None)
+        if isinstance(stats_candidate, dict) and stats_candidate:
+            deepseek_stats_snapshot = dict(stats_candidate)
     if deepseek_owned_client and deepseek_client and hasattr(deepseek_client, "close"):
         try:
             deepseek_client.close()
@@ -429,12 +464,19 @@ def run_analysis(
         report_df = report_df.sort_index()
         report_map[display_label] = report_df
         if not report_df.empty:
+            quality_mask = None
+            if "meta_signal_prob" in report_df.columns:
+                quality_mask = report_df["meta_signal_prob"].astype(float) < LOW_QUALITY_HOLD_THRESHOLD
+                report_df["quality_override"] = quality_mask.fillna(False)
             latest_series = report_df.iloc[-1]
             latest_row = {
                 key: (float(value) if isinstance(value, Number) else value)
                 for key, value in latest_series.to_dict().items()
             }
-            latest_row["timestamp"] = report_df.index[-1]
+            latest_timestamp = report_df.index[-1]
+            latest_row["timestamp"] = latest_timestamp
+            if isinstance(latest_timestamp, pd.Timestamp):
+                latest_row["data_age_days"] = max(0, (today - latest_timestamp.date()).days)
 
             decision_series = report_df["decision"]
             change_mask = decision_series.ne(decision_series.shift())
@@ -516,6 +558,19 @@ def run_analysis(
             if "key_drivers" not in latest_row:
                 latest_row["key_drivers"] = []
 
+            quality_override = False
+            quality_threshold = LOW_QUALITY_HOLD_THRESHOLD
+            if isinstance(quality_prob, Number) and math.isfinite(quality_prob):
+                if quality_prob < quality_threshold:
+                    quality_override = True
+                    original_decision = str(latest_row.get("decision"))
+                    latest_row["decision_raw"] = original_decision
+                    latest_row["decision"] = "hold"
+                    latest_row["action_hint"] = "保持观望（信号质量偏低）"
+                    if "low_quality" not in latest_row["risk_flags"]:
+                        latest_row["risk_flags"].append("low_quality")
+            latest_row["quality_override"] = quality_override
+
             latest_price = latest_series.get("price")
             base_price = None
             if "signal_changed_at" in latest_row and latest_row["signal_changed_at"]:
@@ -594,7 +649,7 @@ def run_analysis(
         "lookback_years": lookback_years,
         "data_start": data_start.date() if pd.notna(data_start) else None,
         "data_end": data_end.date() if pd.notna(data_end) else None,
-        "today": dt.date.today(),
+        "today": today,
         "resample_frequency": resample_frequency.lower(),
         "selected_frequencies": [resample_frequency.lower()],
         "horizon": horizon,
@@ -628,6 +683,8 @@ def run_analysis(
         "latest_only": getattr(deepseek_config, "latest_only", None) if deepseek_enabled else None,
         "error": deepseek_error,
     }
+    if deepseek_stats_snapshot:
+        meta["deepseek"]["stats"] = deepseek_stats_snapshot
 
     insights: Dict[str, Any] = {}
     meta_for_briefing = dict(meta)

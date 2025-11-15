@@ -1,5 +1,5 @@
 {
-  "generated_at": "2025-10-17T09:52:41.830216",
+  "generated_at": "2025-11-15T10:10:26.452219",
   "runs": [
     {
       "label": "us_default_weekly",
@@ -18,10 +18,13 @@
         "AVGO",
         "IWM",
         "XLF",
-        "XLK"
+        "XLK",
+        "TSLL",
+        "ROKU",
+        "BB"
       ],
       "params": {
-        "lookback_years": 10,
+        "lookback_years": 12,
         "horizon": 12,
         "threshold": 0.055,
         "min_threshold": 0.02,
@@ -31,42 +34,46 @@
         "model_name": "default_model",
         "model_type": "auto"
       },
-      "training_time": "2025-10-17T09:29:50.422272",
+      "training_time": "2025-11-15T09:24:37.558808",
       "available_tickers": [
         "AAPL",
         "AMD",
         "AMZN",
         "AVGO",
+        "BB",
         "GOOGL",
         "IWM",
         "META",
         "MSFT",
         "NVDA",
         "QQQ",
+        "ROKU",
         "SPY",
         "TSLA",
+        "TSLL",
         "VTI",
         "XLF",
         "XLK"
       ],
       "missing_tickers": [],
       "model_type_by_market": {
-        "global": "hist_gb"
+        "global:global": "ensemble"
       },
       "classification_metrics": {
-        "accuracy": 0.8424010217113665,
-        "macro_precision": 0.8549820420646768,
-        "macro_recall": 0.8854470477666245,
-        "macro_f1": 0.8602480507839964
+        "accuracy": 0.6761213720316622,
+        "macro_precision": 0.42907251195212526,
+        "macro_recall": 0.6406849287323624,
+        "macro_f1": 0.5109490195504925
       },
       "oof_metrics": {
         "global": {
-          "model_type": "hist_gb",
+          "model_type": "ensemble",
           "cv_metrics": {
-            "oof_accuracy": 0.5286274509803922,
-            "oof_macro_precision": 0.2601280436607893,
-            "oof_macro_recall": 0.3317540879044613,
-            "oof_macro_f1": 0.23100274274010044
+            "macro_precision": 0.413785633054033,
+            "macro_recall": 0.38305088742829085,
+            "macro_f1": 0.3010848328931004,
+            "accuracy": 0.371632915545728,
+            "hold_recall": 0.19975677449463272
           }
         }
       },
@@ -75,131 +82,155 @@
           {
             "ticker": "AAPL",
             "horizon": 4,
-            "average_signal_return": 0.0398290668003909,
-            "hit_ratio": 0.7181372549019608,
-            "cumulative_return": 3381935.258847685,
-            "trades": 408
+            "average_signal_return": 0.031945916652934156,
+            "hit_ratio": 0.6875,
+            "cumulative_return": 700834.5979302789,
+            "trades": 464
           },
           {
             "ticker": "MSFT",
             "horizon": 4,
-            "average_signal_return": 0.0322802758135936,
-            "hit_ratio": 0.753393665158371,
-            "cumulative_return": 705223.6163670964,
-            "trades": 442
+            "average_signal_return": 0.02949864550641674,
+            "hit_ratio": 0.7151394422310757,
+            "cumulative_return": 1017458.4470334242,
+            "trades": 502
           },
           {
             "ticker": "NVDA",
             "horizon": 4,
-            "average_signal_return": 0.07330406172643045,
-            "hit_ratio": 0.7324263038548753,
-            "cumulative_return": 1736426492063.2878,
-            "trades": 441
+            "average_signal_return": 0.06730155553317861,
+            "hit_ratio": 0.7120921305182342,
+            "cumulative_return": 23837297352424.234,
+            "trades": 521
           },
           {
             "ticker": "VTI",
             "horizon": 4,
-            "average_signal_return": 0.018488388911139755,
-            "hit_ratio": 0.7368421052631579,
-            "cumulative_return": 2919.6294680446513,
-            "trades": 456
+            "average_signal_return": 0.01760475814824768,
+            "hit_ratio": 0.7377690802348337,
+            "cumulative_return": 5132.5081051462175,
+            "trades": 511
           },
           {
             "ticker": "QQQ",
             "horizon": 4,
-            "average_signal_return": 0.026622464730796692,
-            "hit_ratio": 0.759090909090909,
-            "cumulative_return": 63155.70820767417,
-            "trades": 440
+            "average_signal_return": 0.023009131287043256,
+            "hit_ratio": 0.7277992277992278,
+            "cumulative_return": 76352.32924311257,
+            "trades": 518
           },
           {
             "ticker": "SPY",
             "horizon": 4,
-            "average_signal_return": 0.01896256941486855,
-            "hit_ratio": 0.742152466367713,
-            "cumulative_return": 3144.370151983674,
-            "trades": 446
+            "average_signal_return": 0.017727735935114026,
+            "hit_ratio": 0.740234375,
+            "cumulative_return": 5804.313880481628,
+            "trades": 512
           },
           {
             "ticker": "TSLA",
             "horizon": 4,
-            "average_signal_return": 0.09665592064794616,
-            "hit_ratio": 0.7198952879581152,
-            "cumulative_return": 16224449808516.223,
-            "trades": 382
+            "average_signal_return": 0.08819496180657767,
+            "hit_ratio": 0.6683168316831684,
+            "cumulative_return": 3830360178900.2417,
+            "trades": 404
           },
           {
             "ticker": "AMD",
             "horizon": 4,
-            "average_signal_return": 0.08423364704981674,
-            "hit_ratio": 0.6818181818181818,
-            "cumulative_return": 9352646706237.021,
-            "trades": 418
+            "average_signal_return": 0.07655964665117707,
+            "hit_ratio": 0.6615384615384615,
+            "cumulative_return": 3757163573021.9976,
+            "trades": 455
           },
           {
             "ticker": "META",
             "horizon": 4,
-            "average_signal_return": 0.04710630122354305,
-            "hit_ratio": 0.7480719794344473,
-            "cumulative_return": 15571977.723607427,
-            "trades": 389
+            "average_signal_return": 0.04369697680421421,
+            "hit_ratio": 0.7310924369747899,
+            "cumulative_return": 142300374.74151817,
+            "trades": 476
           },
           {
             "ticker": "GOOGL",
             "horizon": 4,
-            "average_signal_return": 0.03377824141400873,
-            "hit_ratio": 0.7146118721461188,
-            "cumulative_return": 912929.3239207168,
-            "trades": 438
+            "average_signal_return": 0.031360992841423595,
+            "hit_ratio": 0.6896551724137931,
+            "cumulative_return": 1558680.9974801862,
+            "trades": 493
           },
           {
             "ticker": "AMZN",
             "horizon": 4,
-            "average_signal_return": 0.04356655855658607,
-            "hit_ratio": 0.7659033078880407,
-            "cumulative_return": 6843006.074344869,
-            "trades": 393
+            "average_signal_return": 0.03460709593162474,
+            "hit_ratio": 0.700990099009901,
+            "cumulative_return": 6755421.004821398,
+            "trades": 505
           },
           {
             "ticker": "AVGO",
             "horizon": 4,
-            "average_signal_return": 0.04856911120137711,
-            "hit_ratio": 0.7253012048192771,
-            "cumulative_return": 83120553.47872485,
-            "trades": 415
+            "average_signal_return": 0.04436967023306492,
+            "hit_ratio": 0.6963249516441006,
+            "cumulative_return": 893172915.6239697,
+            "trades": 517
           },
           {
             "ticker": "IWM",
             "horizon": 4,
-            "average_signal_return": 0.027161137469803573,
-            "hit_ratio": 0.7196029776674938,
-            "cumulative_return": 30266.509415699664,
-            "trades": 403
+            "average_signal_return": 0.020284667185515574,
+            "hit_ratio": 0.6745689655172413,
+            "cumulative_return": 6502.726186321235,
+            "trades": 464
           },
           {
             "ticker": "XLF",
             "horizon": 4,
-            "average_signal_return": 0.026378498879709483,
-            "hit_ratio": 0.7153284671532847,
-            "cumulative_return": 29148.25138102779,
-            "trades": 411
+            "average_signal_return": 0.0202581889546651,
+            "hit_ratio": 0.7041666666666667,
+            "cumulative_return": 8818.352270068528,
+            "trades": 480
           },
           {
             "ticker": "XLK",
             "horizon": 4,
-            "average_signal_return": 0.025450234459627265,
-            "hit_ratio": 0.744343891402715,
-            "cumulative_return": 37896.054322559794,
-            "trades": 442
+            "average_signal_return": 0.023975651394528414,
+            "hit_ratio": 0.7283464566929134,
+            "cumulative_return": 95916.4574380541,
+            "trades": 508
+          },
+          {
+            "ticker": "TSLL",
+            "horizon": 4,
+            "average_signal_return": 0.19521674523746965,
+            "hit_ratio": 0.6790123456790124,
+            "cumulative_return": 29673.144621924246,
+            "trades": 81
+          },
+          {
+            "ticker": "ROKU",
+            "horizon": 4,
+            "average_signal_return": 0.11795598060610285,
+            "hit_ratio": 0.7142857142857143,
+            "cumulative_return": 11534096973.880571,
+            "trades": 252
+          },
+          {
+            "ticker": "BB",
+            "horizon": 4,
+            "average_signal_return": 0.06640294743563249,
+            "hit_ratio": 0.6470588235294118,
+            "cumulative_return": 51487068.01038847,
+            "trades": 340
           }
         ],
         "summary": {
-          "hit_ratio_mean": 0.7317946583283107,
-          "hit_ratio_median": 0.7324263038548753,
-          "average_signal_return_mean": 0.042825765219975866,
-          "cumulative_return_mean": 1820908913931.5017,
-          "total_trades": 6324,
-          "avg_trades_per_ticker": 421.6
+          "hit_ratio_mean": 0.7008828434121414,
+          "hit_ratio_median": 0.7025783828382839,
+          "average_signal_return_mean": 0.052776181563607256,
+          "cumulative_return_mean": 1746525134570.756,
+          "total_trades": 8003,
+          "avg_trades_per_ticker": 444.6111111111111
         }
       }
     },
@@ -218,7 +249,7 @@
         "GLD"
       ],
       "params": {
-        "lookback_years": 10,
+        "lookback_years": 12,
         "horizon": 12,
         "threshold": 0.05,
         "min_threshold": 0.018,
@@ -228,7 +259,7 @@
         "model_name": "default_model_diversified",
         "model_type": "auto"
       },
-      "training_time": "2025-10-17T09:37:55.608367",
+      "training_time": "2025-11-15T09:47:12.555985",
       "available_tickers": [
         "DVY",
         "GLD",
@@ -243,22 +274,22 @@
       ],
       "missing_tickers": [],
       "model_type_by_market": {
-        "global": "random_forest"
+        "global:global": "hist_gb"
       },
       "classification_metrics": {
-        "accuracy": 0.9802681992337164,
-        "macro_precision": 0.9793018959014915,
-        "macro_recall": 0.9808709935828152,
-        "macro_f1": 0.9799718315770077
+        "accuracy": 0.613738019169329,
+        "macro_precision": 0.7812741511520822,
+        "macro_recall": 0.5851825822756055,
+        "macro_f1": 0.5350275721535419
       },
       "oof_metrics": {
         "global": {
-          "model_type": "random_forest",
+          "model_type": "hist_gb",
           "cv_metrics": {
-            "oof_accuracy": 0.4524705882352941,
-            "oof_macro_precision": 0.2728103903174542,
-            "oof_macro_recall": 0.3203745688992892,
-            "oof_macro_f1": 0.23635949657470198
+            "oof_accuracy": 0.3770358306188925,
+            "oof_macro_precision": 0.21386404459952021,
+            "oof_macro_recall": 0.32691904046875714,
+            "oof_macro_f1": 0.25783972424053875
           }
         }
       },
@@ -267,91 +298,91 @@
           {
             "ticker": "SPY",
             "horizon": 4,
-            "average_signal_return": 0.020465089687588478,
-            "hit_ratio": 0.740343347639485,
-            "cumulative_return": 8526.065608275612,
-            "trades": 466
+            "average_signal_return": 0.020457300499034888,
+            "hit_ratio": 0.7528089887640449,
+            "cumulative_return": 6280.656430487874,
+            "trades": 445
           },
           {
             "ticker": "VTI",
             "horizon": 4,
-            "average_signal_return": 0.022121135223622055,
-            "hit_ratio": 0.7494456762749445,
-            "cumulative_return": 13025.12288460795,
-            "trades": 451
+            "average_signal_return": 0.02277730608019895,
+            "hit_ratio": 0.780373831775701,
+            "cumulative_return": 11928.602304530305,
+            "trades": 428
           },
           {
             "ticker": "QQQ",
             "horizon": 4,
-            "average_signal_return": 0.02879796414248234,
-            "hit_ratio": 0.7573033707865169,
-            "cumulative_return": 185882.59910443507,
-            "trades": 445
+            "average_signal_return": 0.026349960409696904,
+            "hit_ratio": 0.7389380530973452,
+            "cumulative_return": 79180.63972188503,
+            "trades": 452
           },
           {
             "ticker": "IWD",
             "horizon": 4,
-            "average_signal_return": 0.02121476128433121,
-            "hit_ratio": 0.7219512195121951,
-            "cumulative_return": 3995.963708599007,
-            "trades": 410
+            "average_signal_return": 0.020251933497788567,
+            "hit_ratio": 0.7275280898876404,
+            "cumulative_return": 969.6515220191468,
+            "trades": 356
           },
           {
             "ticker": "DVY",
             "horizon": 4,
-            "average_signal_return": 0.021546495352859848,
-            "hit_ratio": 0.7329974811083123,
-            "cumulative_return": 3319.7427522347716,
-            "trades": 397
+            "average_signal_return": 0.02163171474491856,
+            "hit_ratio": 0.7401812688821753,
+            "cumulative_return": 960.6641744016465,
+            "trades": 331
           },
           {
             "ticker": "XLV",
             "horizon": 4,
-            "average_signal_return": 0.01768961279255141,
-            "hit_ratio": 0.6873449131513648,
-            "cumulative_return": 871.9596529076489,
-            "trades": 403
+            "average_signal_return": 0.017901790090884023,
+            "hit_ratio": 0.6978609625668449,
+            "cumulative_return": 593.3324846764283,
+            "trades": 374
           },
           {
             "ticker": "XLE",
             "horizon": 4,
-            "average_signal_return": 0.03888022005282226,
-            "hit_ratio": 0.7108433734939759,
-            "cumulative_return": 2381147.513646211,
-            "trades": 415
+            "average_signal_return": 0.0397025110829784,
+            "hit_ratio": 0.6898954703832753,
+            "cumulative_return": 29876.45061970574,
+            "trades": 287
           },
           {
             "ticker": "XLU",
             "horizon": 4,
-            "average_signal_return": 0.019493679744494535,
-            "hit_ratio": 0.6909090909090909,
-            "cumulative_return": 1171.0652694428968,
-            "trades": 385
+            "average_signal_return": 0.019779270525260868,
+            "hit_ratio": 0.7016129032258065,
+            "cumulative_return": 1059.4641662115748,
+            "trades": 372
           },
           {
             "ticker": "XLI",
             "horizon": 4,
-            "average_signal_return": 0.024820878423576928,
-            "hit_ratio": 0.6985294117647058,
-            "cumulative_return": 13448.805440475351,
-            "trades": 408
+            "average_signal_return": 0.02230214043611206,
+            "hit_ratio": 0.6832460732984293,
+            "cumulative_return": 3075.032574496241,
+            "trades": 382
           },
           {
             "ticker": "GLD",
             "horizon": 4,
-            "average_signal_return": 0.022475918522180793,
-            "hit_ratio": 0.7330210772833724,
-            "cumulative_return": 10274.734410225512,
-            "trades": 427
+            "average_signal_return": 0.01835817704404906,
+            "hit_ratio": 0.6788732394366197,
+            "cumulative_return": 486.9094305607394,
+            "trades": 355
           }
         ],
         "summary": {
-          "hit_ratio_mean": 0.7222688961923964,
-          "hit_ratio_median": 0.7274743503102536,
-          "average_signal_return_mean": 0.023750575522650984,
-          "cumulative_return_mean": 262166.3572477415,
-          "total_trades": 4207,
-          "avg_trades_per_ticker": 420.7
+          "hit_ratio_mean": 0.7191318881317882,
+          "hit_ratio_median": 0.7145704965567234,
+          "average_signal_return_mean": 0.02295121044109223,
+          "cumulative_return_mean": 13441.140342897474,
+          "total_trades": 3782,
+          "avg_trades_per_ticker": 378.2
         }
       }
     },
@@ -367,10 +398,11 @@
         "002415.SZ",
         "601012.SS",
         "600887.SS",
-        "000858.SZ"
+        "000858.SZ",
+        "600050.SS"
       ],
       "params": {
-        "lookback_years": 8,
+        "lookback_years": 9,
         "horizon": 12,
         "threshold": 0.06,
         "min_threshold": 0.02,
@@ -380,13 +412,14 @@
         "model_name": "default_model",
         "model_type": "auto"
       },
-      "training_time": "2025-10-17T09:44:11.022658",
+      "training_time": "2025-11-15T10:00:02.203985",
       "available_tickers": [
         "000001.SZ",
         "000858.SZ",
         "002415.SZ",
         "300750.SZ",
         "600036.SS",
+        "600050.SS",
         "600276.SS",
         "600519.SS",
         "600887.SS",
@@ -395,22 +428,27 @@
       ],
       "missing_tickers": [],
       "model_type_by_market": {
-        "china_a": "random_forest"
+        "china_a:consumer defensive": "random_forest",
+        "china_a:financial services": "ensemble",
+        "china_a:healthcare": "hist_gb",
+        "china_a:industrials": "ensemble",
+        "china_a:technology": "ensemble",
+        "china_a:communication services": "random_forest"
       },
       "classification_metrics": {
-        "accuracy": 0.2958579881656805,
-        "macro_precision": 0.30583724280882735,
-        "macro_recall": 0.3260206009180339,
-        "macro_f1": 0.3120299194771415
+        "accuracy": 0.49367342839927697,
+        "macro_precision": 0.35399142681361223,
+        "macro_recall": 0.5522475320582072,
+        "macro_f1": 0.4234172520538077
       },
       "oof_metrics": {
         "china_a": {
           "model_type": "random_forest",
           "cv_metrics": {
-            "oof_accuracy": 0.37652439024390244,
-            "oof_macro_precision": 0.24220118207379357,
-            "oof_macro_recall": 0.38544037482980315,
-            "oof_macro_f1": 0.28915887772508686
+            "oof_accuracy": 0.9980099502487563,
+            "oof_macro_precision": 0.9613997113997114,
+            "oof_macro_recall": 0.9993158884898238,
+            "oof_macro_f1": 0.9797628056947659
           }
         }
       },
@@ -419,91 +457,99 @@
           {
             "ticker": "600519.SS",
             "horizon": 4,
-            "average_signal_return": 0.037369153260411916,
-            "hit_ratio": 0.7218543046357616,
-            "cumulative_return": 154.2618396278866,
-            "trades": 151
+            "average_signal_return": 0.03994801446596309,
+            "hit_ratio": 0.7346938775510204,
+            "cumulative_return": 280455.86783439486,
+            "trades": 343
           },
           {
             "ticker": "601318.SS",
             "horizon": 4,
-            "average_signal_return": 0.014232500738086573,
-            "hit_ratio": 0.625,
-            "cumulative_return": 4.099524026562788,
-            "trades": 144
+            "average_signal_return": 0.037861613268580306,
+            "hit_ratio": 0.7093023255813954,
+            "cumulative_return": 156633.83015736507,
+            "trades": 344
           },
           {
             "ticker": "600036.SS",
             "horizon": 4,
-            "average_signal_return": 0.027039254974218472,
-            "hit_ratio": 0.6308724832214765,
-            "cumulative_return": 32.7337235527978,
-            "trades": 149
+            "average_signal_return": 0.0358618644920617,
+            "hit_ratio": 0.7013698630136986,
+            "cumulative_return": 177161.34013640595,
+            "trades": 365
           },
           {
             "ticker": "000001.SZ",
             "horizon": 4,
-            "average_signal_return": 0.03372477770091851,
-            "hit_ratio": 0.6948051948051948,
-            "cumulative_return": 104.45694629742243,
-            "trades": 154
+            "average_signal_return": 0.03855266204644942,
+            "hit_ratio": 0.6973684210526315,
+            "cumulative_return": 656288.2592992974,
+            "trades": 380
           },
           {
             "ticker": "600276.SS",
             "horizon": 4,
-            "average_signal_return": 0.0339430266630272,
-            "hit_ratio": 0.6013986013986014,
-            "cumulative_return": 66.29556373286633,
-            "trades": 143
+            "average_signal_return": 0.05484233353264479,
+            "hit_ratio": 0.7553763440860215,
+            "cumulative_return": 170401739.39924717,
+            "trades": 372
           },
           {
             "ticker": "300750.SZ",
             "horizon": 4,
-            "average_signal_return": 0.04750452462457455,
-            "hit_ratio": 0.63125,
-            "cumulative_return": 701.6500167111444,
-            "trades": 160
+            "average_signal_return": 0.05617960670130789,
+            "hit_ratio": 0.6604651162790698,
+            "cumulative_return": 31701.85681504003,
+            "trades": 215
           },
           {
             "ticker": "002415.SZ",
             "horizon": 4,
-            "average_signal_return": 0.039006090125581754,
-            "hit_ratio": 0.6951219512195121,
-            "cumulative_return": 277.01875023752797,
-            "trades": 164
+            "average_signal_return": 0.023445865776783058,
+            "hit_ratio": 0.6198630136986302,
+            "cumulative_return": 274.02897092058276,
+            "trades": 292
           },
           {
             "ticker": "601012.SS",
             "horizon": 4,
-            "average_signal_return": 0.0670494264835304,
-            "hit_ratio": 0.7161290322580646,
-            "cumulative_return": 7798.392989549259,
-            "trades": 155
+            "average_signal_return": 0.036885790971547636,
+            "hit_ratio": 0.6419354838709678,
+            "cumulative_return": 9189.921819088666,
+            "trades": 310
           },
           {
             "ticker": "600887.SS",
             "horizon": 4,
-            "average_signal_return": 0.0331042981915345,
-            "hit_ratio": 0.7194244604316546,
-            "cumulative_return": 71.30929118129411,
-            "trades": 139
+            "average_signal_return": 0.0348222252144628,
+            "hit_ratio": 0.6758409785932722,
+            "cumulative_return": 35126.06683459261,
+            "trades": 327
           },
           {
             "ticker": "000858.SZ",
             "horizon": 4,
-            "average_signal_return": 0.03610022986445887,
-            "hit_ratio": 0.6875,
-            "cumulative_return": 342.33688843591585,
-            "trades": 192
+            "average_signal_return": 0.056270803669345934,
+            "hit_ratio": 0.7578347578347578,
+            "cumulative_return": 52191189.70178708,
+            "trades": 351
+          },
+          {
+            "ticker": "600050.SS",
+            "horizon": 4,
+            "average_signal_return": 0.02633917730255093,
+            "hit_ratio": 0.6289592760180995,
+            "cumulative_return": 167.55438050444099,
+            "trades": 221
           }
         ],
         "summary": {
-          "hit_ratio_mean": 0.6723356027970265,
-          "hit_ratio_median": 0.6911525974025974,
-          "average_signal_return_mean": 0.03690732826263428,
-          "cumulative_return_mean": 955.2555533352677,
-          "total_trades": 1551,
-          "avg_trades_per_ticker": 155.1
+          "hit_ratio_mean": 0.6893644961435967,
+          "hit_ratio_median": 0.6973684210526315,
+          "average_signal_return_mean": 0.0400918143128816,
+          "cumulative_return_mean": 20358175.257025626,
+          "total_trades": 3520,
+          "avg_trades_per_ticker": 320.0
         }
       }
     },
@@ -522,7 +568,7 @@
         "002230.SZ"
       ],
       "params": {
-        "lookback_years": 8,
+        "lookback_years": 9,
         "horizon": 12,
         "threshold": 0.065,
         "min_threshold": 0.025,
@@ -532,7 +578,7 @@
         "model_name": "default_model_china_growth",
         "model_type": "auto"
       },
-      "training_time": "2025-10-17T09:52:41.829859",
+      "training_time": "2025-11-15T10:10:26.449931",
       "available_tickers": [
         "002230.SZ",
         "002371.SZ",
@@ -547,22 +593,25 @@
       ],
       "missing_tickers": [],
       "model_type_by_market": {
-        "china_a": "hist_gb"
+        "china_a:industrials": "hist_gb",
+        "china_a:technology": "ensemble",
+        "china_a:consumer cyclical": "ensemble",
+        "china_a:healthcare": "random_forest"
       },
       "classification_metrics": {
-        "accuracy": 0.03215020576131687,
-        "macro_precision": 0.11268331713380524,
-        "macro_recall": 0.03171755453021042,
-        "macro_f1": 0.034125153769885286
+        "accuracy": 0.514446793516561,
+        "macro_precision": 0.6235603140086028,
+        "macro_recall": 0.5377212184717793,
+        "macro_f1": 0.43053722043839465
       },
       "oof_metrics": {
         "china_a": {
           "model_type": "hist_gb",
           "cv_metrics": {
-            "oof_accuracy": 0.31401273885350317,
-            "oof_macro_precision": 0.3544052748242999,
-            "oof_macro_recall": 0.31553051723108183,
-            "oof_macro_f1": 0.25594780213134133
+            "oof_accuracy": 0.3019108280254777,
+            "oof_macro_precision": 0.3220665012002522,
+            "oof_macro_recall": 0.3049530367389164,
+            "oof_macro_f1": 0.2621006012654341
           }
         }
       },
@@ -571,91 +620,91 @@
           {
             "ticker": "300750.SZ",
             "horizon": 4,
-            "average_signal_return": 0.014004861043816737,
-            "hit_ratio": 0.4943820224719101,
-            "cumulative_return": 0.8003301972321208,
-            "trades": 89
+            "average_signal_return": 0.05729548875029631,
+            "hit_ratio": 0.6536796536796536,
+            "cumulative_return": 95402.03200367345,
+            "trades": 231
           },
           {
             "ticker": "002475.SZ",
             "horizon": 4,
-            "average_signal_return": -0.04532670447209684,
-            "hit_ratio": 0.32941176470588235,
-            "cumulative_return": -0.9900126111239311,
-            "trades": 85
+            "average_signal_return": 0.059328994757304174,
+            "hit_ratio": 0.7371794871794872,
+            "cumulative_return": 11670304.738286959,
+            "trades": 312
           },
           {
             "ticker": "002594.SZ",
             "horizon": 4,
-            "average_signal_return": 0.021134309687082912,
-            "hit_ratio": 0.4431818181818182,
-            "cumulative_return": 1.6868170097495296,
-            "trades": 88
+            "average_signal_return": -0.02342261418368862,
+            "hit_ratio": 0.3556701030927835,
+            "cumulative_return": -0.9974217709722131,
+            "trades": 194
           },
           {
             "ticker": "688981.SS",
             "horizon": 4,
-            "average_signal_return": -0.03530420391014756,
-            "hit_ratio": 0.4823529411764706,
-            "cumulative_return": -1.001247192767276,
-            "trades": 85
+            "average_signal_return": 0.04909100795713699,
+            "hit_ratio": 0.7388535031847133,
+            "cumulative_return": 911.4635904352564,
+            "trades": 157
           },
           {
             "ticker": "600438.SS",
             "horizon": 4,
-            "average_signal_return": 0.03756318499001784,
-            "hit_ratio": 0.6144578313253012,
-            "cumulative_return": 6.691077223603853,
-            "trades": 83
+            "average_signal_return": 0.06843098706684202,
+            "hit_ratio": 0.7005649717514124,
+            "cumulative_return": 1187779907.1939704,
+            "trades": 354
           },
           {
             "ticker": "603259.SS",
             "horizon": 4,
-            "average_signal_return": -0.029942283656580186,
-            "hit_ratio": 0.37349397590361444,
-            "cumulative_return": -0.9525951330339112,
-            "trades": 83
+            "average_signal_return": 0.039154550870074585,
+            "hit_ratio": 0.646551724137931,
+            "cumulative_return": 1783.1124717442115,
+            "trades": 232
           },
           {
             "ticker": "300014.SZ",
             "horizon": 4,
-            "average_signal_return": 0.004901212366545141,
-            "hit_ratio": 0.5172413793103449,
-            "cumulative_return": -0.3261161287330693,
-            "trades": 58
+            "average_signal_return": 0.0781387344881425,
+            "hit_ratio": 0.7283464566929134,
+            "cumulative_return": 17534710.322007738,
+            "trades": 254
           },
           {
             "ticker": "300015.SZ",
             "horizon": 4,
-            "average_signal_return": 0.02243854929611192,
-            "hit_ratio": 0.6190476190476191,
-            "cumulative_return": 2.88539555824528,
-            "trades": 84
+            "average_signal_return": 0.03546004721679417,
+            "hit_ratio": 0.7127659574468085,
+            "cumulative_return": 6450.826042770221,
+            "trades": 282
           },
           {
             "ticker": "002371.SZ",
             "horizon": 4,
-            "average_signal_return": -0.024646829183743044,
-            "hit_ratio": 0.3978494623655914,
-            "cumulative_return": -0.9517909717327819,
-            "trades": 93
+            "average_signal_return": 0.0758102492609569,
+            "hit_ratio": 0.6923076923076923,
+            "cumulative_return": 238894537.05900735,
+            "trades": 299
           },
           {
             "ticker": "002230.SZ",
             "horizon": 4,
-            "average_signal_return": 0.0007566275985802058,
-            "hit_ratio": 0.5192307692307693,
-            "cumulative_return": -0.4319609539929192,
-            "trades": 104
+            "average_signal_return": 0.05178539367799699,
+            "hit_ratio": 0.6666666666666666,
+            "cumulative_return": 6707320.754268139,
+            "trades": 348
           }
         ],
         "summary": {
-          "hit_ratio_mean": 0.4790649583719321,
-          "hit_ratio_median": 0.4883674818241903,
-          "average_signal_return_mean": -0.0034421276240412884,
-          "cumulative_return_mean": 0.7409896997446892,
-          "total_trades": 852,
-          "avg_trades_per_ticker": 85.2
+          "hit_ratio_mean": 0.6632586216140062,
+          "hit_ratio_median": 0.6964363320295524,
+          "average_signal_return_mean": 0.04910728398618561,
+          "cumulative_return_mean": 146269132.65042275,
+          "total_trades": 2663,
+          "avg_trades_per_ticker": 266.3
         }
       }
     }

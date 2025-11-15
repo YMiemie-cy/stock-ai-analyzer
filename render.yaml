@@ -8,3 +8,14 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+jobs:
+  - type: cron
+    name: refresh-assets
+    env: python
+    plan: free
+    schedule: "0 2 * * *"
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: python scripts/maintenance.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9

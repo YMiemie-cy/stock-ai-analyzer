@@ -17,7 +17,11 @@ from sklearn.metrics import classification_report, accuracy_score, f1_score, rec
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.linear_model import LogisticRegression
+
+try:  # pragma: no cover - optional dependency
+    import lightgbm as lgb  # type: ignore
+except Exception:
+    lgb = None
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / "models"
 MODEL_DIR.mkdir(exist_ok=True)
@@ -50,6 +54,21 @@ class ModelArtifacts:
         return joblib.load(path)
 
 
+def _prob_gap_from_matrix(prob_matrix: np.ndarray) -> np.ndarray:
+    if prob_matrix.size == 0:
+        return np.zeros(prob_matrix.shape[0])
+    sorted_probs = np.sort(prob_matrix, axis=1)
+    if sorted_probs.shape[1] < 2:
+        return sorted_probs[:, -1]
+    return (sorted_probs[:, -1] - sorted_probs[:, -2]).astype(float)
+
+
+def _prob_max_from_matrix(prob_matrix: np.ndarray) -> np.ndarray:
+    if prob_matrix.size == 0:
+        return np.zeros(prob_matrix.shape[0])
+    return np.max(prob_matrix, axis=1).astype(float)
+
+
 FEATURE_COLUMNS = [
     "Open",
     "High",
@@ -64,8 +83,10 @@ FEATURE_COLUMNS = [
     "ema_20",
     "ema_50",
     "ema_100",
+    "ema_200",
     "ema_20_slope_5d",
     "ema_50_slope_5d",
+    "ema_200_slope_10d",
     "rsi_7",
     "rsi_14",
     "rsi_28",
@@ -76,6 +97,8 @@ FEATURE_COLUMNS = [
     "bb_mid",
     "bb_low",
     "bb_pct",
+    "bollinger_width",
+    "keltner_channel_width",
     "return_1d",
     "return_5d",
     "return_3d",
@@ -164,6 +187,26 @@ FEATURE_COLUMNS = [
     "macro_region_sp500_pct_change_5d",
     "macro_region_sp500_zscore_60d",
     "macro_region_sp500_ema_ratio_30",
+    "sector_tech_level",
+    "sector_tech_pct_change_5d",
+    "sector_tech_zscore_60d",
+    "sector_tech_ema_ratio_30",
+    "sector_finance_level",
+    "sector_finance_pct_change_5d",
+    "sector_finance_zscore_60d",
+    "sector_finance_ema_ratio_30",
+    "sector_energy_level",
+    "sector_energy_pct_change_5d",
+    "sector_energy_zscore_60d",
+    "sector_energy_ema_ratio_30",
+    "sector_healthcare_level",
+    "sector_healthcare_pct_change_5d",
+    "sector_healthcare_zscore_60d",
+    "sector_healthcare_ema_ratio_30",
+    "sector_industry_level",
+    "sector_industry_pct_change_5d",
+    "sector_industry_zscore_60d",
+    "sector_industry_ema_ratio_30",
     "macro_liquidity_spread",
     "macro_risk_spread",
     "macro_vix_to_us10y",
@@ -202,6 +245,12 @@ DEFAULT_RF_PARAM_CANDIDATES = (
     {"n_estimators": 600, "max_depth": None, "min_samples_leaf": 3, "max_features": 0.7},
 )
 
+DEFAULT_LGBM_PARAM_CANDIDATES = (
+    {"learning_rate": 0.045, "num_leaves": 63, "min_child_samples": 25, "subsample": 0.9},
+    {"learning_rate": 0.06, "num_leaves": 95, "min_child_samples": 28, "subsample": 0.85},
+    {"learning_rate": 0.08, "num_leaves": 127, "min_child_samples": 32, "subsample": 0.8},
+)
+
 MARKET_CONFIG: Dict[str, Dict[str, object]] = {
     "global": {
         "param_candidates": DEFAULT_PARAM_CANDIDATES,
@@ -216,6 +265,7 @@ MARKET_CONFIG: Dict[str, Dict[str, object]] = {
         "bias_hold_recall_weight": 0.15,
         "bias_multipliers": [0.75, 0.9, 1.0, 1.1, 1.2],
         "rf_param_candidates": DEFAULT_RF_PARAM_CANDIDATES,
+        "lgbm_param_candidates": DEFAULT_LGBM_PARAM_CANDIDATES,
     },
     "china_a": {
         "param_candidates": (
@@ -239,12 +289,39 @@ MARKET_CONFIG: Dict[str, Dict[str, object]] = {
             {"n_estimators": 500, "max_depth": 20, "min_samples_leaf": 2, "max_features": 0.65},
             {"n_estimators": 650, "max_depth": None, "min_samples_leaf": 3, "max_features": "sqrt"},
         ),
+        "lgbm_param_candidates": DEFAULT_LGBM_PARAM_CANDIDATES,
     },
 }
 
 
 def _market_config(market: str) -> Dict[str, object]:
     return MARKET_CONFIG.get(market, MARKET_CONFIG["global"])
+
+
+def _build_time_series_splits(
+    n_samples: int,
+    n_splits: int,
+    *,
+    min_train_size: int = 180,
+    test_size: int = 60,
+    step: Optional[int] = None,
+) -> List[tuple[np.ndarray, np.ndarray]]:
+    if n_samples <= 0 or n_splits <= 0:
+        return []
+    min_train_size = max(60, min_train_size)
+    test_size = max(30, test_size)
+    if n_samples < (min_train_size + test_size):
+        return []
+    step = step or test_size
+    splits: List[tuple[np.ndarray, np.ndarray]] = []
+    start = min_train_size
+    total = np.arange(n_samples)
+    while start + test_size <= n_samples and len(splits) < n_splits:
+        train_idx = total[:start]
+        test_idx = total[start : start + test_size]
+        splits.append((train_idx, test_idx))
+        start += step
+    return splits
 
 
 def _build_estimator(
@@ -271,6 +348,16 @@ def _build_estimator(
         }
         base_params.update(params)
         return RandomForestClassifier(**base_params)
+    if model_type == "lightgbm":
+        if lgb is None:
+            raise ValueError("LightGBM is not installed; please pip install lightgbm.")
+        base_params = {
+            "random_state": random_state,
+            "n_estimators": 400 if final else 250,
+            "n_jobs": -1,
+        }
+        base_params.update(params)
+        return lgb.LGBMClassifier(**base_params)
     raise ValueError(f"Unsupported model_type: {model_type}")
 
 
@@ -511,8 +598,15 @@ def train_model(
 
     n_samples = len(dataset_sorted)
     max_splits = min(5, max(2, n_samples // 120))
-    cv_splits: List[tuple[np.ndarray, np.ndarray]] = []
-    if max_splits >= 2:
+    approx_test = max(45, int(n_samples * 0.15))
+    min_train = max(120, approx_test * 2)
+    cv_splits: List[tuple[np.ndarray, np.ndarray]] = _build_time_series_splits(
+        n_samples,
+        max_splits,
+        min_train_size=min_train,
+        test_size=approx_test,
+    )
+    if not cv_splits and max_splits >= 2:
         tscv = TimeSeriesSplit(n_splits=max_splits)
         cv_splits = list(tscv.split(dataset_sorted))
 
@@ -539,6 +633,21 @@ def train_model(
                 _evaluate_candidate_model(
                     "random_forest",
                     rf_params,
+                    X_all,
+                    y_all,
+                    cv_splits,
+                    class_weight,
+                    random_state,
+                )
+            )
+
+    if model_type in {"auto", "lightgbm"} and lgb is not None:
+        lgb_params = config.get("lgbm_param_candidates", DEFAULT_LGBM_PARAM_CANDIDATES)
+        if lgb_params:
+            candidate_results.append(
+                _evaluate_candidate_model(
+                    "lightgbm",
+                    lgb_params,
                     X_all,
                     y_all,
                     cv_splits,
@@ -857,30 +966,53 @@ def train_model(
                     "meta_signal_confidence",
                     "regime_score",
                     "regime_volatility",
-                "regime_trend",
-                "macro_liquidity_spread",
-                "macro_risk_spread",
-                "macro_vix_to_us10y",
-                "trend_alignment_score",
-                "macro_region_csi300_zscore_60d",
-                "macro_region_csi300_pct_change_5d",
-                "macro_region_shanghai_zscore_60d",
-                "macro_region_cnh_zscore_60d",
-                "macro_region_hang_seng_zscore_60d",
-                "macro_region_nasdaq_zscore_60d",
-                "macro_region_russell_zscore_60d",
-                "macro_region_sp500_zscore_60d",
-                "fundamental_pe_ratio",
-                "fundamental_price_to_book",
-                "fundamental_beta",
-            ]
+                    "regime_trend",
+                    "macro_liquidity_spread",
+                    "macro_risk_spread",
+                    "macro_vix_to_us10y",
+                    "trend_alignment_score",
+                    "macro_region_csi300_zscore_60d",
+                    "macro_region_csi300_pct_change_5d",
+                    "macro_region_shanghai_zscore_60d",
+                    "macro_region_cnh_zscore_60d",
+                    "macro_region_hang_seng_zscore_60d",
+                    "macro_region_nasdaq_zscore_60d",
+                    "macro_region_russell_zscore_60d",
+                    "macro_region_sp500_zscore_60d",
+                    "fundamental_pe_ratio",
+                    "fundamental_price_to_book",
+                    "fundamental_beta",
+                    "return_1d",
+                    "return_5d",
+                    "return_10d",
+                    "return_20d",
+                    "return_60d",
+                    "volatility_20d",
+                    "volatility_60d",
+                    "atr_ratio",
+                    "trend_strength_20d",
+                    "trend_strength_60d",
+                    "volume_zscore",
+                    "relative_return_20d",
+                    "relative_return_60d",
+                    "relative_strength_pct",
+                    "macro_vix_level",
+                    "macro_dxy_level",
+                    "macro_us10y_level",
+                ]
                 for column in candidate_cols:
                     if column in dataset_sorted.columns:
                         col_name = f"meta_col_{column}"
                         meta_features[col_name] = dataset_sorted[column].fillna(0.0).to_numpy()
                         meta_feature_specs.append({"kind": "column", "column": column, "name": col_name})
 
+                meta_features["meta_prob_gap"] = _prob_gap_from_matrix(base_probs_train)
+                meta_feature_specs.append({"kind": "prob_gap", "name": "meta_prob_gap"})
+                meta_features["meta_prob_max"] = _prob_max_from_matrix(base_probs_train)
+                meta_feature_specs.append({"kind": "prob_max", "name": "meta_prob_max"})
+
                 meta_df = pd.DataFrame(meta_features, index=dataset_sorted.index)
+                meta_df = meta_df.replace([np.inf, -np.inf], 0.0).fillna(0.0)
                 meta_scaler = StandardScaler()
                 meta_X = meta_scaler.fit_transform(meta_df)
                 meta_y = meta_target.values
@@ -890,12 +1022,32 @@ def train_model(
                 if meta_active_series is not None:
                     sample_weight_meta = sample_weight_meta * (1.0 + meta_active_series.clip(0, 1) * 0.05)
 
-                logistic = LogisticRegression(max_iter=400, class_weight="balanced")
-                logistic.fit(meta_X, meta_y, sample_weight=sample_weight_meta)
-                meta_model = logistic
+                meta_estimator = HistGradientBoostingClassifier(
+                    max_depth=3,
+                    learning_rate=0.08,
+                    l2_regularization=0.1,
+                    max_iter=300,
+                    min_samples_leaf=20,
+                    random_state=random_state,
+                )
+                meta_calibrated = CalibratedClassifierCV(meta_estimator, method="sigmoid", cv=3)
+                meta_calibrated.fit(meta_X, meta_y, sample_weight=sample_weight_meta)
+                meta_model = meta_calibrated
+                meta_pred = meta_calibrated.predict(meta_X)
+                meta_report = classification_report(
+                    meta_y,
+                    meta_pred,
+                    output_dict=True,
+                    zero_division=0,
+                )
                 print(
                     f"[meta] Trained meta-signal model on {len(meta_y)} samples"
                     f" (positive={positive_count})"
+                )
+                print(
+                    "[meta] accuracy "
+                    f"{meta_report.get('accuracy', 0.0):.3f} | macro_f1 "
+                    f"{meta_report.get('macro avg', {}).get('f1-score', 0.0):.3f}"
                 )
             except Exception as exc:
                 meta_scaler = None
@@ -964,6 +1116,12 @@ def predict_signals(dataset: pd.DataFrame, artifacts: ModelArtifacts) -> pd.Data
                     meta_feature_data[name] = dataset[column].to_numpy()
                 else:
                     meta_feature_data[name] = np.zeros(len(dataset))
+            elif kind == "prob_gap":
+                meta_feature_data[name] = _prob_gap_from_matrix(probs)
+            elif kind == "prob_max":
+                meta_feature_data[name] = _prob_max_from_matrix(probs)
+            else:
+                meta_feature_data[name] = np.zeros(len(dataset))
         if meta_feature_data:
             meta_df = pd.DataFrame(meta_feature_data, index=dataset.index).fillna(0.0)
             meta_matrix = artifacts.meta_scaler.transform(meta_df)

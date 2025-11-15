@@ -28,7 +28,7 @@ def test_apply_deepseek_fusion_latest_only():
         },
         index=index,
     )
-    config = DeepseekConfig(api_key="dummy", weight=0.5, latest_only=True)
+    config = DeepseekConfig(api_key="dummy", weight=0.5, latest_only=True, apply_only_when_low_confidence=False)
     decision = DeepseekDecision(label="buy", confidence=0.8, reason="Momentum improving")
     client = StubClient(decision)
 
@@ -58,7 +58,13 @@ def test_apply_deepseek_fusion_respects_max_rows():
         },
         index=index,
     )
-    config = DeepseekConfig(api_key="dummy", weight=0.4, latest_only=False, max_rows=1)
+    config = DeepseekConfig(
+        api_key="dummy",
+        weight=0.4,
+        latest_only=False,
+        max_rows=1,
+        apply_only_when_low_confidence=False,
+    )
     decision = DeepseekDecision(label="sell", confidence=0.7, reason="Weakness detected")
     client = StubClient(decision)
 

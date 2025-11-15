@@ -128,6 +128,33 @@ for region, mapping in REGION_MACRO_SERIES.items():
     for key in mapping.keys():
         REGION_FEATURE_KEYS.setdefault(region, set()).add(key)
 
+SECTOR_SERIES: Dict[str, str] = {
+    "tech": "XLK",
+    "finance": "XLF",
+    "energy": "XLE",
+    "healthcare": "XLV",
+    "industry": "XLI",
+}
+
+
+def _sanitize_price_frame(prices: pd.DataFrame) -> pd.DataFrame:
+    if prices is None or prices.empty:
+        return prices
+    working = prices.copy()
+    if not working.index.is_monotonic_increasing:
+        working = working.sort_index()
+    working = working[~working.index.duplicated(keep="last")]
+    numeric_cols = [col for col in working.columns if working[col].dtype.kind in {"i", "u", "f"}]
+    working[numeric_cols] = working[numeric_cols].replace([np.inf, -np.inf], np.nan)
+    required_cols = [col for col in ["Open", "High", "Low", "Close", "Adj Close"] if col in working.columns]
+    if required_cols:
+        working.dropna(subset=required_cols, inplace=True)
+    if "Volume" in working.columns:
+        working["Volume"] = working["Volume"].fillna(0.0)
+        working = working[working["Volume"] >= 0.0]
+    working = working.fillna(method="ffill").fillna(method="bfill")
+    return working
+
 
 def _ticker_region(ticker: str) -> str:
     if "." in ticker:
@@ -179,6 +206,11 @@ def _load_security_metadata(ticker: str) -> Dict[str, object]:
     }
     _SECURITY_META_CACHE[ticker] = meta
     return meta
+
+
+def load_security_metadata(ticker: str) -> Dict[str, object]:
+    """Public helper used by other modules."""
+    return _load_security_metadata(ticker)
 
 
 def _load_benchmark_series(symbol: str, start: pd.Timestamp, end: pd.Timestamp) -> Optional[pd.Series]:
@@ -277,7 +309,8 @@ def _download_price_history(
         group_by="column",
         threads=False,
     )
-    return _normalize_price_columns(data, ticker)
+    normalized = _normalize_price_columns(data, ticker)
+    return _sanitize_price_frame(normalized)
 
 
 def _ensure_adjusted_close(prices: pd.DataFrame, ticker: str, start: dt.date, end: dt.date, cache_file: Path) -> pd.DataFrame:
@@ -306,6 +339,7 @@ def fetch_price_history(ticker: str, lookback_years: int = 5) -> PriceData:
     if cache_file.exists():
         prices = pd.read_parquet(cache_file)
         prices = _normalize_price_columns(prices, ticker)
+        prices = _sanitize_price_frame(prices)
     else:
         prices = pd.DataFrame()
 
@@ -344,6 +378,7 @@ def fetch_price_history(ticker: str, lookback_years: int = 5) -> PriceData:
         prices.to_parquet(cache_file)
 
     prices = _normalize_price_columns(prices, ticker)
+    prices = _sanitize_price_frame(prices)
     prices = _ensure_adjusted_close(prices, ticker, start, end, cache_file)
 
     prices.index = pd.to_datetime(prices.index)
@@ -390,6 +425,7 @@ def resample_price_data(price_data: PriceData, frequency: str) -> PriceData:
     resampled.index = pd.to_datetime(resampled.index).tz_localize(None)
     if frequency.upper().startswith("W"):
         resampled.index = resampled.index - pd.Timedelta(days=6)
+    resampled = _sanitize_price_frame(resampled)
     result = replace(price_data, prices=resampled, frequency=frequency.upper())
     _remember_resampled_data(cache_key, result)
     return _copy_price_data(result)
@@ -434,8 +470,10 @@ def build_feature_frame(price_data: PriceData, horizon: int = 5) -> pd.DataFrame
     df["ema_20"] = df["Adj Close"].ewm(span=20, adjust=False).mean()
     df["ema_50"] = df["Adj Close"].ewm(span=50, adjust=False).mean()
     df["ema_100"] = df["Adj Close"].ewm(span=100, adjust=False).mean()
+    df["ema_200"] = df["Adj Close"].ewm(span=200, adjust=False).mean()
     df["ema_20_slope_5d"] = df["ema_20"].pct_change(periods=5)
     df["ema_50_slope_5d"] = df["ema_50"].pct_change(periods=5)
+    df["ema_200_slope_10d"] = df["ema_200"].pct_change(periods=10)
     df["rsi_7"] = compute_rsi(df["Adj Close"], window=7)
     df["rsi_14"] = compute_rsi(df["Adj Close"], window=14)
     df["rsi_28"] = compute_rsi(df["Adj Close"], window=28)
@@ -443,8 +481,13 @@ def build_feature_frame(price_data: PriceData, horizon: int = 5) -> pd.DataFrame
     df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
     df["macd_hist"] = df["macd"] - df["macd_signal"]
     df["bb_up"], df["bb_mid"], df["bb_low"], df["bb_pct"] = compute_bollinger(df["Adj Close"], window=20)
+    bollinger_span = df["bb_up"] - df["bb_low"]
+    df["bollinger_width"] = (bollinger_span / df["bb_mid"]).replace([np.inf, -np.inf], np.nan)
     df["atr_14"] = compute_atr(df, window=14)
     df["atr_ratio"] = df["atr_14"] / df["Adj Close"]
+    keltner_upper = df["ema_20"] + df["atr_14"] * 1.5
+    keltner_lower = df["ema_20"] - df["atr_14"] * 1.5
+    df["keltner_channel_width"] = ((keltner_upper - keltner_lower) / df["ema_20"]).replace([np.inf, -np.inf], np.nan)
 
     # Additional technical indicators from `ta` library
     adx_indicator = ADXIndicator(high=df["High"], low=df["Low"], close=df["Close"], window=14, fillna=True)
@@ -598,6 +641,29 @@ def build_feature_frame(price_data: PriceData, horizon: int = 5) -> pd.DataFrame
         df.get("macro_vix_zscore_60d", 0.0) - df.get("macro_us10y_zscore_60d", 0.0)
     )
 
+    sector_start = df.index.min()
+    sector_end = df.index.max()
+    for sector_key, symbol in SECTOR_SERIES.items():
+        base = f"sector_{sector_key}"
+        series = _load_macro_series(symbol, sector_start, sector_end)
+        if series is None or series.empty:
+            df[f"{base}_level"] = np.nan
+            df[f"{base}_pct_change_5d"] = np.nan
+            df[f"{base}_zscore_60d"] = np.nan
+            df[f"{base}_ema_ratio_30"] = np.nan
+            continue
+        aligned = series.reindex(df.index).ffill().bfill()
+        df[f"{base}_level"] = aligned
+        pct_change_5d = aligned.pct_change(5, fill_method=None).replace([np.inf, -np.inf], np.nan)
+        df[f"{base}_pct_change_5d"] = pct_change_5d
+        rolling_mean = aligned.rolling(60, min_periods=20).mean()
+        rolling_std = aligned.rolling(60, min_periods=20).std()
+        zscore = (aligned - rolling_mean) / rolling_std
+        df[f"{base}_zscore_60d"] = zscore.replace([np.inf, -np.inf], np.nan)
+        ema_30 = aligned.ewm(span=30, adjust=False, min_periods=10).mean()
+        ratio_ema = aligned / ema_30 - 1.0
+        df[f"{base}_ema_ratio_30"] = ratio_ema.replace([np.inf, -np.inf], np.nan)
+
     vol_ratio = df["volatility_ratio"].replace([np.inf, -np.inf], np.nan).fillna(1.0)
     trend_strength = df["trend_strength_20d"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
     risk_on = (-df.get("macro_vix_zscore_60d", pd.Series(0.0, index=df.index))).fillna(0.0)
@@ -689,6 +755,10 @@ def build_feature_frame(price_data: PriceData, horizon: int = 5) -> pd.DataFrame
         "price_to_bollinger_band",
         "ema_20_slope_5d",
         "ema_50_slope_5d",
+        "ema_200",
+        "ema_200_slope_10d",
+        "bollinger_width",
+        "keltner_channel_width",
         "macro_liquidity_spread",
         "macro_risk_spread",
         "macro_vix_to_us10y",
@@ -722,6 +792,15 @@ def build_feature_frame(price_data: PriceData, horizon: int = 5) -> pd.DataFrame
                 f"macro_region_{macro_key}_pct_change_5d",
                 f"macro_region_{macro_key}_zscore_60d",
                 f"macro_region_{macro_key}_ema_ratio_30",
+            ]
+        )
+    for sector_key in SECTOR_SERIES.keys():
+        zero_fill_cols.extend(
+            [
+                f"sector_{sector_key}_level",
+                f"sector_{sector_key}_pct_change_5d",
+                f"sector_{sector_key}_zscore_60d",
+                f"sector_{sector_key}_ema_ratio_30",
             ]
         )
     for col in zero_fill_cols:
@@ -782,6 +861,7 @@ def label_signals(
     adaptive_threshold: bool = False,
     min_threshold: float = 0.01,
     max_threshold: float = 0.06,
+    meta_quality_floor: float = 0.25,
 ) -> pd.DataFrame:
     """Label rows with buy/hold/sell classes based on future returns.
 
@@ -807,11 +887,27 @@ def label_signals(
     abs_future = future_return.abs()
     meta_threshold = threshold_series * 1.15
     meta_threshold = meta_threshold.replace(0.0, threshold)
-    df["meta_signal_active"] = ((abs_future >= meta_threshold).astype(int)).where(label_available, 0)
-    df["meta_signal_magnitude"] = future_return
     confidence_ratio = (abs_future / meta_threshold.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
-    df["meta_signal_confidence"] = confidence_ratio.fillna(0.0).clip(0.0, 5.0)
+    meta_confidence = confidence_ratio.fillna(0.0).clip(0.0, 5.0)
+    positive_conf = meta_confidence[meta_confidence > 0]
+    dynamic_floor = float(meta_quality_floor)
+    if not positive_conf.empty:
+        quantile_floor = float(positive_conf.quantile(0.7))
+        if np.isfinite(quantile_floor):
+            dynamic_floor = max(meta_quality_floor, min(quantile_floor, 0.95))
+    quality_mask = meta_confidence >= dynamic_floor
+    df["meta_quality_dynamic_floor"] = dynamic_floor
+    df["meta_signal_active"] = (label_available & quality_mask & (abs_future >= meta_threshold)).astype(int)
+    df["meta_signal_magnitude"] = future_return
+    df["meta_signal_confidence"] = meta_confidence
     df["meta_signal_direction"] = np.sign(future_return).fillna(0.0)
+    high_cut = min(dynamic_floor + 0.25, 0.95)
+    medium_cut = max(dynamic_floor - 0.1, 0.0)
+    df["meta_signal_quality_bucket"] = np.where(
+        meta_confidence >= high_cut,
+        "high",
+        np.where(meta_confidence >= medium_cut, "medium", "low"),
+    )
     return df
 
 

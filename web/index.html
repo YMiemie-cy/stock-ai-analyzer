@@ -21,47 +21,82 @@
 
     <main>
       <section id="search-view" class="view active">
-        <h2>输入股票，获取当前买卖建议</h2>
-        <form id="search-form">
-          <label>
-            股票代码（逗号分隔）：
-            <input
-              type="text"
-              id="tickers-input"
-              placeholder="例如：NVDA, AAPL, 600519"
-              required
-            />
-          </label>
-          <div id="ticker-suggestions" class="suggestions hidden"></div>
-          <div class="options">
-            <label>
-              观测年数：
-              <input type="number" id="lookback-input" value="5" min="1" />
-            </label>
-            <label>
-              预测周期（周）：
-              <input type="number" id="horizon-input" value="12" min="1" />
-            </label>
-            <label>
-              阈值：
-              <input type="number" step="0.01" id="threshold-input" value="0.05" />
-            </label>
-            <label>
-              分析频率：
-              <select id="frequency-select">
-                <option value="weekly" selected>周线</option>
-                <option value="daily">日线</option>
-                <option value="combined">周线 + 日线</option>
-              </select>
-            </label>
-            <label class="checkbox">
-              <input type="checkbox" id="adaptive-checkbox" checked />
-              使用自适应阈值
-            </label>
+        <div class="analysis-header">
+          <div class="form-card">
+            <h2>输入股票，获取当前买卖建议</h2>
+            <form id="search-form">
+              <label>
+                股票代码（逗号分隔）：
+                <input
+                  type="text"
+                  id="tickers-input"
+                  placeholder="例如：NVDA, AAPL, 600519"
+                  required
+                />
+              </label>
+              <div id="ticker-suggestions" class="suggestions hidden"></div>
+              <div class="options">
+                <label>
+                  观测年数：
+                  <input type="number" id="lookback-input" value="5" min="1" />
+                </label>
+                <label>
+                  预测周期（周）：
+                  <input type="number" id="horizon-input" value="12" min="1" />
+                </label>
+                <label>
+                  阈值：
+                  <input type="number" step="0.01" id="threshold-input" value="0.05" />
+                </label>
+                <label>
+                  分析频率：
+                  <select id="frequency-select">
+                    <option value="weekly" selected>周线</option>
+                    <option value="daily">日线</option>
+                    <option value="combined">周线 + 日线</option>
+                  </select>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" id="adaptive-checkbox" checked />
+                  使用自适应阈值
+                </label>
+              </div>
+              <button type="submit">开始分析</button>
+            </form>
+            <div id="search-status" class="status"></div>
           </div>
-          <button type="submit">开始分析</button>
-        </form>
-        <div id="search-status" class="status"></div>
+          <section id="overview-panel" class="overview-panel hidden">
+            <div class="overview-primary">
+              <div class="overview-headline">
+                <p class="overview-title" id="overview-title">--</p>
+                <p class="overview-subtitle">
+                  最近更新 <span id="overview-updated">--</span>
+                </p>
+              </div>
+              <div class="overview-metrics" id="overview-metrics">
+                <div class="metric">
+                  <span class="metric-label">买入</span>
+                  <span class="metric-value" id="metric-buy">0</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">持有</span>
+                  <span class="metric-value" id="metric-hold">0</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">卖出</span>
+                  <span class="metric-value" id="metric-sell">0</span>
+                </div>
+              </div>
+            </div>
+            <div class="priority-alerts hidden" id="priority-alerts">
+              <div class="priority-header">
+                <span>优先处理</span>
+                <button type="button" id="alerts-toggle" class="link-button">查看全部</button>
+              </div>
+              <ul id="priority-alerts-list"></ul>
+            </div>
+          </section>
+        </div>
         <div class="result-controls hidden" id="result-controls">
           <div class="control-group">
             <label>
@@ -92,6 +127,31 @@
             <span id="search-updated" class="hint"></span>
           </div>
         </div>
+        <details class="legend-card legend-card--floating" id="legend-search">
+          <summary>标签说明</summary>
+          <ul class="legend-list">
+            <li>
+              <span class="risk-badge risk-badge--low">信心不足</span>
+              <p>买卖概率差距过小，模型对方向没有把握，宜观望或等下一条信号。</p>
+            </li>
+            <li>
+              <span class="risk-badge risk-badge--low">质量偏低</span>
+              <p>历史命中率较低，类似场景过去成功率不高，操作前需额外确认。</p>
+            </li>
+            <li>
+              <span class="risk-badge risk-badge--flip">刚刚翻转</span>
+              <p>信号刚发生变更，短期可能反复波动，建议分批执行或等待确认。</p>
+            </li>
+            <li>
+              <span class="risk-badge risk-badge--edge">临界</span>
+              <p>当前分数接近触发阈值，价格小幅波动就可能改判，需密切关注。</p>
+            </li>
+            <li>
+              <span class="risk-badge">数据偏旧</span>
+              <p>最新样本距离今天超过 5 天，建议刷新数据或切换到日线模式。</p>
+            </li>
+          </ul>
+        </details>
         <section id="search-insights" class="insights hidden">
           <div class="insight-card" id="briefing-card">
             <div class="insight-card__header">
@@ -174,6 +234,31 @@
           <button id="refresh-portfolio">立即刷新</button>
           <span id="portfolio-status" class="status"></span>
         </div>
+        <details class="legend-card legend-card--floating" id="legend-portfolio">
+          <summary>标签说明</summary>
+          <ul class="legend-list">
+            <li>
+              <span class="risk-badge risk-badge--low">信心不足</span>
+              <p>买卖概率差距小，模型倾向不明显，可等待更清晰的信号再调整仓位。</p>
+            </li>
+            <li>
+              <span class="risk-badge risk-badge--low">质量偏低</span>
+              <p>历史命中率偏弱，此类信号过去表现一般，执行前请结合其他依据。</p>
+            </li>
+            <li>
+              <span class="risk-badge risk-badge--flip">刚刚翻转</span>
+              <p>建议或风险提示刚变更，短线波动可能放大，适合小步试探或锁盈。</p>
+            </li>
+            <li>
+              <span class="risk-badge risk-badge--edge">临界</span>
+              <p>当前得分接近阈值，下一根 K 线就可能触发反向操作，适合重点盯盘。</p>
+            </li>
+            <li>
+              <span class="risk-badge">数据偏旧</span>
+              <p>最新数据距离今天偏久（≥5 天），请刷新分析或切换至日线以获取更新。</p>
+            </li>
+          </ul>
+        </details>
         <div id="portfolio-health" class="insight-card hidden">
           <div class="insight-card__header">
             <h3>持仓健康面板</h3>
