@@ -128,6 +128,30 @@ DeepSeek 会输出结构化的 `label/confidence/reason`，系统会根据设定
 - **批量训练**：通过 `python scripts/train_all.py` 一次性刷新美股/中概/A 股等预设组合的模型，脚本同时输出多组模型（默认/成长/红利等）的分类指标、OOF 验证结果与回测统计到 `reports/model_metrics_latest.json`，并在 `reports/model_metrics_history.jsonl` 中累计留档，便于纵向对比。
 - **集成通知**：CLI 的 `--export-signals` 与 `--summary-report` 生成的 CSV/Markdown 已存在于 `reports/` 目录，可按需接入 Webhook 或自动化发布流程，无需重复计算信号。
 
+## 部署到 Render
+
+本项目已配置 `render.yaml` 支持一键部署:
+
+1. **连接 GitHub 仓库**: 在 [Render Dashboard](https://dashboard.render.com/) 选择 "New Web Service"
+2. **授权仓库**: 连接 `YMiemie-cy/stock-ai-analyzer`
+3. **自动检测配置**: Render 会读取 `render.yaml` 自动配置
+4. **构建过程**: 
+   - 安装依赖 (`requirements.txt`)
+   - **自动训练模型** (`python scripts/train_all.py`, 约需 5-10 分钟)
+   - 启动 FastAPI 服务
+5. **定时任务**: 已配置每日 02:00 UTC 自动刷新数据和模型
+
+### 环境变量(可选)
+
+- `DEEPSEEK_API_KEY`: 启用 DeepSeek LLM 融合
+- `ENABLE_DEEPSEEK_FUSION=1`: 开启概率融合
+
+### ⚠️ 重要提示
+
+- **首次构建时间较长**: 模型训练需要 5-10 分钟,请耐心等待
+- **Free Plan 限制**: Render Free Plan 在 15 分钟无访问后会休眠,首次访问需要冷启动(约 30-60 秒)
+- **模型不在 Git 中**: 为避免大文件,模型在每次部署时重新训练
+
 ## 规划路线
 
 - [X] 设计整体架构与项目结构。
@@ -135,6 +159,7 @@ DeepSeek 会输出结构化的 `label/confidence/reason`，系统会根据设定
 - [X] 完成基于技术指标与标签的特征工程。
 - [X] 构建 AI + 指标混合信号生成器。
 - [X] 提供用于批量分析与报告的 CLI。
+- [X] 配置 Render 自动化部署与定时刷新。
 - [ ] 输出信号到 CSV/JSON 并集成通知渠道。
 - [ ] 试验更高级的 AI 模型（Transformer、强化学习等）。
 
