@@ -132,24 +132,37 @@ def ensure_model(
             _MODEL_CACHE[(model_name, market, artifacts.model_type)] = artifacts
         return artifacts
 
-    if console:
-        console.print(f"Loading model artifacts from {artifacts_path}")
-    artifacts = load_artifacts(model_name)
-    artifacts.market = market
-    if model_type != "auto" and getattr(artifacts, "model_type", model_type) != model_type:
+    # Try loading existing model
+    try:
         if console:
-            console.print(
-                f"[yellow]Existing artifact model_type={artifacts.model_type} "
-                f"does not match requested {model_type}, retraining...[/yellow]"
-            )
+            console.print(f"Loading model artifacts from {artifacts_path}")
+        artifacts = load_artifacts(model_name)
+        artifacts.market = market
+        if model_type != "auto" and getattr(artifacts, "model_type", model_type) != model_type:
+            if console:
+                console.print(
+                    f"[yellow]Existing artifact model_type={artifacts.model_type} "
+                    f"does not match requested {model_type}, retraining...[/yellow]"
+                )
+            artifacts = train_model(dataset, market=market, model_type=model_type)
+            artifacts.save(model_name)
+        if model_type == "auto":
+            _MODEL_CACHE[(model_name, market, artifacts.model_type)] = artifacts
+        if not isinstance(getattr(artifacts, "bias_factors", None), dict):
+            artifacts.bias_factors = get_market_bias_factors(market)
+        _MODEL_CACHE[cache_key] = artifacts
+        return artifacts
+    except (FileNotFoundError, Exception) as exc:
+        # If model loading fails, fall back to training
+        if console:
+            console.print(f"[yellow]Failed to load model ({exc}), training new model...[/yellow]")
         artifacts = train_model(dataset, market=market, model_type=model_type)
         artifacts.save(model_name)
-    if model_type == "auto":
-        _MODEL_CACHE[(model_name, market, artifacts.model_type)] = artifacts
-    if not isinstance(getattr(artifacts, "bias_factors", None), dict):
-        artifacts.bias_factors = get_market_bias_factors(market)
-    _MODEL_CACHE[cache_key] = artifacts
-    return artifacts
+        artifacts.market = market
+        _MODEL_CACHE[cache_key] = artifacts
+        if model_type == "auto":
+            _MODEL_CACHE[(model_name, market, artifacts.model_type)] = artifacts
+        return artifacts
 
 
 def run_analysis(

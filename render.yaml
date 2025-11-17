@@ -3,7 +3,10 @@ services:
     name: stock-ai-analyzer
     env: python
     plan: free
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt && python scripts/train_all.py
+    buildCommand: |
+      pip install --upgrade pip && 
+      pip install -r requirements.txt && 
+      python scripts/train_portfolio.py || echo "Training failed, will train on first request"
     startCommand: uvicorn app_server:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
